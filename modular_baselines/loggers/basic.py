@@ -1,6 +1,9 @@
 import time
 from collections import deque
 import numpy as np
+import os
+import json
+from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from stable_baselines3.common import logger
@@ -83,7 +86,75 @@ class LogRolloutCallback(BaseCollectorCallback):
     def _on_rollout_end(self, locals_) -> None:
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
             logger.record_mean(
-                "rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
+                "rollout/ep_rew_mean",
+                safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
             logger.record_mean(
-                "rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+                "rollout/ep_len_mean",
+                safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
         self.reset_info()
+
+
+class LogParamCallback(BaseAlgorithmCallback):
+    """ """
+
+    def __init__(self,
+                 file_name: str,
+                 log_interval: int = 100,
+                 n_bins: int = 20):
+        super().__init__()
+        self.file_name = file_name
+        self.log_interval = log_interval
+        self.n_bins = n_bins
+        self._reset_buffer()
+
+        self.dir = os.path.join(logger.get_dir(), "hist")
+        self.path = os.path.join(self.dir, self.file_name)
+        if os.path.exists(self.path):
+            raise FileExistsError(
+                "File at {} already exists".format(self.path))
+        os.makedirs(self.dir, exist_ok=True)
+
+    def _on_training_start(self, *args) -> None:
+        pass
+
+    def _on_step(self, locals_) -> bool:
+        policy = locals_["self"].policy
+        iteration = locals_["iteration"]
+
+        for name, weight in policy.named_parameters():
+            if self._param(weight) is not None:
+                self.histogram_buffer[name].append(
+                    self._param(weight).detach().cpu().clone().numpy())
+
+        if iteration % self.log_interval == 0:
+            for name, weight_list in self.histogram_buffer.items():
+                freqs, bins = np.histogram(
+                    np.stack(weight_list), bins=self.n_bins, density=True)
+                self.histogram_buffer[name] = {
+                    "bins": bins.tolist(),
+                    "freqs": freqs.tolist()}
+            with open(self.path, "a") as jsonfile:
+                jsonstr = json.dumps(dict(self.histogram_buffer))
+                jsonfile.write(jsonstr + "\n")
+            self._reset_buffer()
+
+    def _param(self, weight):
+        raise NotImplementedError
+
+    def _reset_buffer(self):
+        self.histogram_buffer = defaultdict(list)
+
+    def _on_training_end(self, *args) -> None:
+        pass
+
+
+class LogGradCallback(LogParamCallback):
+
+    def _param(self, weight):
+        return weight.grad
+
+
+class LogWeightCallback(LogParamCallback):
+
+    def _param(self, weight):
+        return weight
