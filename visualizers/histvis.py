@@ -3,6 +3,7 @@ import json
 import plotly
 import numpy as np
 from functools import lru_cache
+from itertools import chain
 
 
 import plotly.graph_objects as go
@@ -84,7 +85,8 @@ class HistRender():
             return None
 
         self.data = infos
-        self.layer_select.options = list(infos[0].keys())
+        self.layer_select.options = sorted(
+            set(chain(*(list(info.keys()) for info in self.data))))
 
     def layer_select_callback(self, change):
         if change["name"] != "value":
