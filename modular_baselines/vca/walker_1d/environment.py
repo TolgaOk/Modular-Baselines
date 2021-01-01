@@ -12,6 +12,13 @@ class WalkEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(n=2)
         self.state = None
 
+    def expected_reward(self):
+        vals = np.zeros(len(self.state_set), dtype="float32")
+        vals[0] = -1
+        vals[-1] = 1
+        vals = vals.reshape(1, -1)
+        return vals
+
     def reset(self):
         self.state = 0
         return self.state

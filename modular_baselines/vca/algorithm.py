@@ -25,6 +25,7 @@ class VCA(OnPolicyAlgorithm):
                  collector: NStepCollector,
                  rollout_len: int,
                  env: VecEnv,
+                 reward_vals: np.ndarray,
                  trans_opt: torch.optim.Optimizer,
                  policy_opt: torch.optim.Optimizer,
                  reward_opt: torch.optim.Optimizer,
@@ -53,6 +54,7 @@ class VCA(OnPolicyAlgorithm):
         self.ent_coef = entropy_coef
         self.use_reward_module = use_reward_module
 
+        self.reward_vals = reward_vals
         self.policy = torch.nn.ModuleList([self.policy_module,
                                            self.transition_module,
                                            self.reward_module])
@@ -68,6 +70,7 @@ class VCA(OnPolicyAlgorithm):
 
         assert torch.all(episode.dones.reshape(-1)[:-1] == 0)
         assert (episode.dones.reshape(-1)[-1] == 1)
+        assert episode.rewards.reshape(-1)[-1] != 0
 
         entropies = []
         expected_rewards = []
@@ -88,7 +91,8 @@ class VCA(OnPolicyAlgorithm):
             if self.use_reward_module:
                 expected_reward = self.reward_module.expected(r_next_state)
             else:
-                expected_reward = self._expected_reward(r_next_state)
+                expected_reward = self._expected_reward(
+                     self.reward_vals, r_next_state)
             expected_rewards.append(expected_reward)
             entropies.append(entropy)
 
@@ -100,7 +104,7 @@ class VCA(OnPolicyAlgorithm):
         (-reward_sum - entropy_sum * self.ent_coef).backward()
         self.policy_opt.step()
 
-        logger.record("train/E[R]", reward_sum.item())
+        logger.record_mean("train/E[R]", reward_sum.item())
         logger.record_mean("train/entropy", entropy_sum.item())
 
     def train_trans_and_reward(self):
@@ -169,18 +173,17 @@ class DiscerteStateVCA(VCA):
         assert len(state.shape) == 2, ""
         return (self.transition_module.state_set.reshape(1, -1) == state).float()
 
-    def _expected_reward(self, next_state_prob: torch.Tensor) -> torch.Tensor:
+    def _expected_reward(self,
+                         reward_arr: np.ndarray,
+                         next_state_prob: torch.Tensor) -> torch.Tensor:
         assert len(next_state_prob.shape) == 2, ""
-        vals = torch.zeros(len(self.transition_module.state_set))
-        vals[0] = -1
-        vals[-1] = 1
-        vals = vals.reshape(1, -1)
-        return (vals * next_state_prob).sum(1).mean(0)
+        reward_tens = torch.from_numpy(reward_arr)
+        return (reward_tens * next_state_prob).sum(1).mean(0)
 
     def transition_loss(self,
-                         state: torch.Tensor,
-                         action: torch.Tensor,
-                         next_state: torch.Tensor) -> torch.Tensor:
+                        state: torch.Tensor,
+                        action: torch.Tensor,
+                        next_state: torch.Tensor) -> torch.Tensor:
         target_next_state = next_state.argmax(dim=1)
         next_state_pred = self.transition_module(state, action)
         trans_loss = torch.nn.functional.cross_entropy(
