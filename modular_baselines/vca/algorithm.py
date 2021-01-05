@@ -77,14 +77,17 @@ class VCA(OnPolicyAlgorithm):
 
         r_state = self._init_soft_state(episode.observations[0].unsqueeze(0))
 
-        for ix in range(len(episode)):
+        for ix in range(len(episode.dones)):
             action = self._action_onehot(episode.actions[ix].unsqueeze(0))
             next_state = self._process_state(
                 episode.next_observations[ix].unsqueeze(0))
 
-            r_action, entropy = self.policy_module.reparam_act(r_state, action)
+            r_action, entropy = self.policy_module.reparam_act(r_state.detach(), action)
             soft_state = self.transition_module.dist(
                 r_state, r_action)
+            logger.record_mean(
+                "playback/trans_mse",
+                torch.nn.functional.mse_loss(next_state, soft_state).item())
             r_next_state = self.transition_module.reparam(
                 next_state, *soft_state)
 
@@ -92,13 +95,14 @@ class VCA(OnPolicyAlgorithm):
                 expected_reward = self.reward_module.expected(r_next_state)
             else:
                 expected_reward = self._expected_reward(
-                     self.reward_vals, r_next_state)
+                    self.reward_vals, r_next_state)
             expected_rewards.append(expected_reward)
             entropies.append(entropy)
 
             r_state = r_next_state
 
         reward_sum = sum(expected_rewards).sum()
+        # reward_sum = expected_rewards[-1].sum()
         entropy_sum = sum(entropies).sum()
         self.policy_opt.zero_grad()
         (-reward_sum - entropy_sum * self.ent_coef).backward()
