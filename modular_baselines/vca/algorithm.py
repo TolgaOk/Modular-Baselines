@@ -33,7 +33,9 @@ class VCA(OnPolicyAlgorithm):
                  batch_size: int = 32,
                  entropy_coef: float = 0.01,
                  callbacks: List[BaseAlgorithmCallback] = [],
-                 device: str = "cpu"):
+                 device: str = "cpu",
+                 verbose_playback: bool = False,
+                 grad_norm: bool = False):
         super().__init__(
             policy_module,
             buffer,
@@ -59,6 +61,9 @@ class VCA(OnPolicyAlgorithm):
                                            self.transition_module,
                                            self.reward_module])
 
+        self.verbose_playback = verbose_playback
+        self.grad_norm = grad_norm
+
     def train(self):
         self.train_policy()
         self.train_trans_and_reward()
@@ -74,22 +79,33 @@ class VCA(OnPolicyAlgorithm):
 
         entropies = []
         expected_rewards = []
+        r_acts = []
+        r_obs = []
 
         r_state = self._init_soft_state(episode.observations[0].unsqueeze(0))
+        r_state.requires_grad = True
 
         for ix in range(len(episode.dones)):
             action = self._action_onehot(episode.actions[ix].unsqueeze(0))
             next_state = self._process_state(
                 episode.next_observations[ix].unsqueeze(0))
 
-            r_action, entropy = self.policy_module.reparam_act(r_state.detach(), action)
-            soft_state = self.transition_module.dist(
-                r_state, r_action)
-            logger.record_mean(
-                "playback/trans_mse",
-                torch.nn.functional.mse_loss(next_state, soft_state).item())
+            r_action, entropy = self.policy_module.reparam_act(r_state, action)
+
+            if self.grad_norm:
+                r_state = GradNormalizer.apply(r_state)
+                r_action = GradNormalizer.apply(r_action)
+
+            r_action.retain_grad()
+            r_acts.append(r_action)
+            r_state.retain_grad()
+            r_obs.append(r_state)
+
+            logits = self.transition_module(r_state, r_action)
+
+
             r_next_state = self.transition_module.reparam(
-                next_state, *soft_state)
+                next_state, logits)
 
             if self.use_reward_module:
                 expected_reward = self.reward_module.expected(r_next_state)
@@ -101,13 +117,27 @@ class VCA(OnPolicyAlgorithm):
 
             r_state = r_next_state
 
-        reward_sum = sum(expected_rewards).sum()
-        # reward_sum = expected_rewards[-1].sum()
+        # reward_sum = sum(expected_rewards).sum()
+        reward_sum = expected_rewards[-1].sum()
         entropy_sum = sum(entropies).sum()
         self.policy_opt.zero_grad()
         (-reward_sum - entropy_sum * self.ent_coef).backward()
-        self.policy_opt.step()
+        
+        for param in self.policy_module.parameters():
+            if torch.any(torch.isnan(param.grad)):
+                # print(param.grad)
+                # print(param)
+                for ix, r_act in enumerate(r_acts):
+                    print(ix, r_act.grad)
+                raise RuntimeError("Nan observed!")
 
+        if np.random.uniform() < 0.01 and self.verbose_playback:
+            for ix, (r_act, r_ob) in enumerate(zip(r_acts, r_obs)):
+                print(ix,
+                      r_act.grad.abs().mean().item(),
+                      r_ob.grad.abs().mean().item())
+
+        self.policy_opt.step()
         logger.record_mean("train/E[R]", reward_sum.item())
         logger.record_mean("train/entropy", entropy_sum.item())
 
@@ -193,3 +223,14 @@ class DiscerteStateVCA(VCA):
         trans_loss = torch.nn.functional.cross_entropy(
             next_state_pred, target_next_state)
         return trans_loss
+
+
+class GradNormalizer(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor):
+        return tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        norm = torch.norm(grad_output, dim=1, keepdim=True)
+        return grad_output / norm
