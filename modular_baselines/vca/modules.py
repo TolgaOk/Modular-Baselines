@@ -124,6 +124,10 @@ class CategoricalTransitionModule(BaseTransitionModule):
         logits = self.out_logit(hidden)
         return logits
 
+    def dist(self, obs, act):
+        logits = self(obs, act)
+        return logits
+
     def reparam(self, obs, logits):
         if self.use_gumbel:
             return self._gumbel(obs, logits)
@@ -133,6 +137,34 @@ class CategoricalTransitionModule(BaseTransitionModule):
         soft_sample = torch.nn.functional.gumbel_softmax(
             logits=logits, tau=self.tau, hard=False)
         return obs - soft_sample.detach() + soft_sample
+
+
+class MultiheadCatgoricalTransitionModule(CategoricalTransitionModule):
+
+    def init_network(self):
+        self.fc = torch.nn.Linear(self.insize, self.hidden_size)
+        self.head = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
+
+    def _forward(self, obs):
+        hidden = torch.relu(self.fc(obs))
+        logits = self.head(hidden).reshape(-1, self.actsize, self.insize)
+        return logits
+
+    def forward(self, obs, act):
+        logits = self._forward(obs)
+        return torch.einsum("bao,ba->bo", logits, act)
+
+    def dist(self, obs, act):
+        logits = self._forward(obs)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        probs = torch.einsum("bao,ba->bo", probs, act)
+        return probs
+        
+    def reparam(self, obs, probs):
+        if self.use_gumbel:
+            raise NotImplementedError
+        assert len(probs.shape) == 2, "Logits must be 2D"
+        return obs + probs - probs.detach()
 
 
 class CategoricalRewardModule(torch.nn.Module):
@@ -168,6 +200,6 @@ class CategoricalRewardModule(torch.nn.Module):
 def straight_through_reparam(logits, onehot_sample):
     assert len(logits.shape) == 2, "Logit is not 2D but {}D".format(len(logits.shape))
     assert logits.shape == onehot_sample.shape, "Shape mismatch"
-    probs = torch.nn.functional.softmax(logits, dim=1).detach()
-    r_prob = onehot_sample * logits
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    r_prob = probs
     return onehot_sample + r_prob - r_prob.detach()
