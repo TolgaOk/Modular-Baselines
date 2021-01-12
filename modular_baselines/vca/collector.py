@@ -75,7 +75,7 @@ class NStepCollector(BaseOnPolicyCollector):
                 obs_tensor = make_onehot(
                     obs_tensor, self.env.observation_space.n)
             actions = self.policy.forward(obs_tensor)
-        actions = actions.cpu().numpy().argmax(1)
+        actions = actions.cpu().numpy()
         actions = np.expand_dims(actions, 1)
         return actions
 

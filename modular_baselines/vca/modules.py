@@ -19,8 +19,12 @@ class CategoricalPolicyModule(torch.nn.Module):
     def forward(self, x):
         logits = self.net(x)
 
-        hard_sample = torch.nn.functional.gumbel_softmax(
-            logits=logits, tau=self.tau, hard=True)
+        # hard_sample = torch.nn.functional.gumbel_softmax(
+        #     logits=logits, tau=self.tau, hard=True)
+        # print(hard_sample.shape, hard_sample)
+        # return None
+        hard_sample = torch.distributions.categorical.Categorical(
+            logits=logits).sample()
         return hard_sample
 
     def reparam_act(self, obs, acts):
@@ -29,7 +33,7 @@ class CategoricalPolicyModule(torch.nn.Module):
             logits=logits).entropy()
         if self.use_gumbel:
             return self._gumbel(logits, acts), entropy
-        return straight_through_reparam(logits, acts), entropy        
+        return straight_through_reparam(logits, acts), entropy
 
     def _gumbel(self, logits, acts):
         soft_sample = torch.nn.functional.gumbel_softmax(
@@ -143,7 +147,8 @@ class MultiheadCatgoricalTransitionModule(CategoricalTransitionModule):
 
     def init_network(self):
         self.fc = torch.nn.Linear(self.insize, self.hidden_size)
-        self.head = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
+        self.head = torch.nn.Linear(
+            self.hidden_size, self.insize * self.actsize)
 
     def _forward(self, obs):
         hidden = torch.relu(self.fc(obs))
@@ -159,7 +164,31 @@ class MultiheadCatgoricalTransitionModule(CategoricalTransitionModule):
         probs = torch.nn.functional.softmax(logits, dim=-1)
         probs = torch.einsum("bao,ba->bo", probs, act)
         return probs
-        
+
+    def reparam(self, obs, probs):
+        if self.use_gumbel:
+            raise NotImplementedError
+        assert len(probs.shape) == 2, "Logits must be 2D"
+        return obs + probs - probs.detach()
+
+
+class FullCategoricalTransitionModule(MultiheadCatgoricalTransitionModule):
+
+    def init_network(self):
+        self.logits = torch.nn.Parameter(
+            torch.randn(self.insize, self.actsize, self.insize))
+
+    @staticmethod
+    def _forward(logits, obs, act):
+        return torch.einsum("san,bs,ba->bn", logits, obs, act)
+
+    def forward(self, obs, act):
+        return self._forward(self.logits, obs, act)
+
+    def dist(self, obs, act):
+        probs = torch.nn.functional.softmax(self.logits, dim=-1)
+        return self._forward(probs, obs, act)
+
     def reparam(self, obs, probs):
         if self.use_gumbel:
             raise NotImplementedError
@@ -198,7 +227,8 @@ class CategoricalRewardModule(torch.nn.Module):
 
 
 def straight_through_reparam(logits, onehot_sample):
-    assert len(logits.shape) == 2, "Logit is not 2D but {}D".format(len(logits.shape))
+    assert len(logits.shape) == 2, "Logit is not 2D but {}D".format(
+        len(logits.shape))
     assert logits.shape == onehot_sample.shape, "Shape mismatch"
     probs = torch.nn.functional.softmax(logits, dim=1)
     r_prob = probs

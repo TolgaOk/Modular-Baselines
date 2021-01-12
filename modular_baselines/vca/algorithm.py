@@ -72,7 +72,6 @@ class VCA(OnPolicyAlgorithm):
         episode = self.buffer.sample_last_episode()
         if episode is None:
             return
-        return
 
         assert torch.all(episode.dones.reshape(-1)[:-1] == 0)
         assert (episode.dones.reshape(-1)[-1] == 1)
@@ -116,8 +115,8 @@ class VCA(OnPolicyAlgorithm):
 
             r_state = r_next_state
 
-        # reward_sum = sum(expected_rewards).sum()
-        reward_sum = expected_rewards[-1].sum()
+        reward_sum = sum(expected_rewards).sum()
+        # reward_sum = expected_rewards[-1].sum()
         entropy_sum = sum(entropies).sum()
         self.policy_opt.zero_grad()
         (-reward_sum - entropy_sum * self.ent_coef).backward()

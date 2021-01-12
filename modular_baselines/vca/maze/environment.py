@@ -12,7 +12,7 @@ class MazeEnv(gym.Env):
     world_map = ["##########",
                  "#      @ #",
                  "#        #",
-                 "#        #",
+                 "##### ####",
                  "#        #",
                  "# P      #",
                  "##########"]
@@ -35,7 +35,7 @@ class MazeEnv(gym.Env):
         self.goal_state = self.state_map[tuple(goal_ix[0])]        
 
     def expected_reward(self):
-        reward_arr = np.ones_like(self.state_set) * 0.
+        reward_arr = np.ones_like(self.state_set) * 0
         reward_arr[self.goal_state] = 1
         return reward_arr
 
