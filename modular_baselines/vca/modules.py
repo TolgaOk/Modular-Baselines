@@ -3,11 +3,12 @@ from abc import ABC, abstractmethod
 
 
 class CategoricalPolicyModule(torch.nn.Module):
-    def __init__(self, insize, actsize, hidden_size, tau=1):
+    def __init__(self, insize, actsize, hidden_size, tau=1, use_gumbel=False):
         super().__init__()
 
         self.insize = insize
         self.actsize = actsize
+        self.use_gumbel = use_gumbel
 
         self.net = torch.nn.Sequential(
             torch.nn.Linear(insize, hidden_size),
@@ -17,20 +18,22 @@ class CategoricalPolicyModule(torch.nn.Module):
 
     def forward(self, x):
         logits = self.net(x)
-
-        hard_sample = torch.nn.functional.gumbel_softmax(
-            logits=logits, tau=self.tau, hard=True)
+        hard_sample = torch.distributions.categorical.Categorical(
+            logits=logits).sample()
         return hard_sample
 
     def reparam_act(self, obs, acts):
         logits = self.net(obs)
-        soft_sample = torch.nn.functional.gumbel_softmax(
-            logits=logits, tau=self.tau, hard=False)
-
         entropy = torch.distributions.categorical.Categorical(
             logits=logits).entropy()
+        if self.use_gumbel:
+            return self._gumbel(logits, acts), entropy
+        return straight_through_reparam(logits, acts), entropy
 
-        return acts - soft_sample.detach() + soft_sample, entropy
+    def _gumbel(self, logits, acts):
+        soft_sample = torch.nn.functional.gumbel_softmax(
+            logits=logits, tau=self.tau, hard=False)
+        return acts - soft_sample.detach() + soft_sample
 
 
 class BaseTransitionModule(torch.nn.Module, ABC):
@@ -52,10 +55,6 @@ class BaseTransitionModule(torch.nn.Module, ABC):
 
     @abstractmethod
     def forward(self):
-        pass
-
-    @abstractmethod
-    def dist(self):
         pass
 
     @abstractmethod
@@ -101,13 +100,15 @@ class CategoricalTransitionModule(BaseTransitionModule):
                  actsize: int,
                  state_set: torch.LongTensor,
                  hidden_size: int = 16,
-                 tau: float = 1.):
+                 tau: float = 1.,
+                 use_gumbel=False):
         super().__init__(insize=insize,
                          actsize=actsize,
                          hidden_size=hidden_size)
         self.tau = tau
         assert len(state_set.shape) == 1, ""
         self.state_set = state_set
+        self.use_gumbel = use_gumbel
 
     def init_network(self):
         self.act_fc = torch.nn.Linear(self.actsize, self.hidden_size)
@@ -116,7 +117,6 @@ class CategoricalTransitionModule(BaseTransitionModule):
         self.out_logit = torch.nn.Linear(self.hidden_size, self.insize)
 
     def forward(self, obs, act):
-
         act = torch.relu(self.act_fc(act))
         obs = torch.relu(self.hidden_fc(obs))
         hidden = self.gru(act, obs)
@@ -125,40 +125,76 @@ class CategoricalTransitionModule(BaseTransitionModule):
 
     def dist(self, obs, act):
         logits = self(obs, act)
+        return logits
+
+    def reparam(self, obs, logits):
+        if self.use_gumbel:
+            return self._gumbel(obs, logits)
+        return straight_through_reparam(logits, obs)
+
+    def _gumbel(self, obs, logits):
         soft_sample = torch.nn.functional.gumbel_softmax(
             logits=logits, tau=self.tau, hard=False)
-
-        return soft_sample
-
-    def reparam(self, obs, soft_sample):
         return obs - soft_sample.detach() + soft_sample
 
 
-class CategoricalRewardModule(torch.nn.Module):
-    def __init__(self,
-                 insize,
-                 reward_set,
-                 hidden_size=16,
-                 tau=1):
-        super().__init__()
-        self.tau = tau
-        self.insize = insize
-        reward_set = torch.as_tensor(reward_set)
-        if len(reward_set.shape) == 1:
-            reward_set = reward_set.reshape(1, -1)
-        self.reward_set = reward_set
+class MultiheadCatgoricalTransitionModule(CategoricalTransitionModule):
 
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(insize, hidden_size),
-            torch.nn.Tanh(),
-            torch.nn.Linear(hidden_size, len(reward_set.reshape(-1))))
+    def init_network(self):
+        self.fc = torch.nn.Linear(self.insize, self.hidden_size)
+        self.head = torch.nn.Linear(
+            self.hidden_size, self.insize * self.actsize)
 
-    def forward(self, x):
-        logits = self.net(x)
-        return torch.distributions.categorical.Categorical(logits=logits)
+    def _forward(self, obs):
+        hidden = torch.relu(self.fc(obs))
+        logits = self.head(hidden).reshape(-1, self.actsize, self.insize)
+        return logits
 
-    def expected(self, next_state):
-        assert len(self.reward_set.shape) == 2, ""
-        assert self.reward_set.shape[0] == 1, ""
-        dist = self(next_state)
-        return (self.reward_set * dist.probs).mean(-1, keepdims=True)
+    def forward(self, obs, act):
+        logits = self._forward(obs)
+        return torch.einsum("bao,ba->bo", logits, act)
+
+    def dist(self, obs, act):
+        logits = self._forward(obs)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        probs = torch.einsum("bao,ba->bo", probs, act)
+        return probs
+
+    def reparam(self, obs, probs):
+        if self.use_gumbel:
+            raise NotImplementedError
+        assert len(probs.shape) == 2, "Logits must be 2D"
+        return obs + probs - probs.detach()
+
+
+class FullCategoricalTransitionModule(MultiheadCatgoricalTransitionModule):
+
+    def init_network(self):
+        self.logits = torch.nn.Parameter(
+            torch.randn(self.insize, self.actsize, self.insize))
+
+    @staticmethod
+    def _forward(logits, obs, act):
+        return torch.einsum("san,bs,ba->bn", logits, obs, act)
+
+    def forward(self, obs, act):
+        return self._forward(self.logits, obs, act)
+
+    def dist(self, obs, act):
+        probs = torch.nn.functional.softmax(self.logits, dim=-1)
+        return self._forward(probs, obs, act)
+
+    def reparam(self, obs, probs):
+        if self.use_gumbel:
+            raise NotImplementedError
+        assert len(probs.shape) == 2, "Logits must be 2D"
+        return obs + probs - probs.detach()
+
+
+def straight_through_reparam(logits, onehot_sample):
+    assert len(logits.shape) == 2, "Logit is not 2D but {}D".format(
+        len(logits.shape))
+    assert logits.shape == onehot_sample.shape, "Shape mismatch"
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    r_prob = probs
+    return onehot_sample + r_prob - r_prob.detach()
