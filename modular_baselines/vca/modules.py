@@ -18,11 +18,6 @@ class CategoricalPolicyModule(torch.nn.Module):
 
     def forward(self, x):
         logits = self.net(x)
-
-        # hard_sample = torch.nn.functional.gumbel_softmax(
-        #     logits=logits, tau=self.tau, hard=True)
-        # print(hard_sample.shape, hard_sample)
-        # return None
         hard_sample = torch.distributions.categorical.Categorical(
             logits=logits).sample()
         return hard_sample
@@ -194,36 +189,6 @@ class FullCategoricalTransitionModule(MultiheadCatgoricalTransitionModule):
             raise NotImplementedError
         assert len(probs.shape) == 2, "Logits must be 2D"
         return obs + probs - probs.detach()
-
-
-class CategoricalRewardModule(torch.nn.Module):
-    def __init__(self,
-                 insize,
-                 reward_set,
-                 hidden_size=16,
-                 tau=1):
-        super().__init__()
-        self.tau = tau
-        self.insize = insize
-        reward_set = torch.as_tensor(reward_set)
-        if len(reward_set.shape) == 1:
-            reward_set = reward_set.reshape(1, -1)
-        self.reward_set = reward_set
-
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(insize, hidden_size),
-            torch.nn.Tanh(),
-            torch.nn.Linear(hidden_size, len(reward_set.reshape(-1))))
-
-    def forward(self, x):
-        logits = self.net(x)
-        return torch.distributions.categorical.Categorical(logits=logits)
-
-    def expected(self, next_state):
-        assert len(self.reward_set.shape) == 2, ""
-        assert self.reward_set.shape[0] == 1, ""
-        dist = self(next_state)
-        return (self.reward_set * dist.probs).mean(-1, keepdims=True)
 
 
 def straight_through_reparam(logits, onehot_sample):

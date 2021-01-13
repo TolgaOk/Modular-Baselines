@@ -158,3 +158,22 @@ class LogWeightCallback(LogParamCallback):
 
     def _param(self, weight):
         return weight
+
+
+class LogHyperparameters(BaseAlgorithmCallback):
+
+    def __init__(self, hyperparameters, file_name="hyperparameters.json"):
+        self.file_name = file_name
+        self.hyperparameters = hyperparameters
+
+    def _on_training_start(self, *args) -> None:
+        path = os.path.join(logger.get_dir(), self.file_name)
+        with open(path, "w") as fobj:
+            json.dump(self.hyperparameters, fobj)
+
+    def _on_training_end(self, *args) -> None:
+        pass
+
+    def _on_step(self, *args) -> None:
+        pass
+    
