@@ -86,16 +86,17 @@ class VCA(OnPolicyAlgorithm):
 
             if self.grad_norm:
                 r_state = GradNormalizer.apply(r_state)
-                r_action = GradNormalizer.apply(r_action)
+                # r_action = GradNormalizer.apply(r_action)
 
             r_action.retain_grad()
             r_acts.append(r_action)
-            r_state.retain_grad()
-            r_obs.append(r_state)
 
-            dist_params = self.transition_module.dist(r_state, r_action)
+            dist = self.transition_module.dist(r_state, r_action)
             r_next_state = self.transition_module.reparam(
-                next_state, dist_params)
+                next_state, dist)
+
+            r_next_state.retain_grad()
+            r_obs.append(r_next_state)
 
             expected_reward = self._expected_reward(
                 self.reward_vals, r_next_state)
@@ -125,8 +126,15 @@ class VCA(OnPolicyAlgorithm):
                       r_ob.grad.abs().mean().item())
 
         self.policy_opt.step()
+
+        logger.record_mean("playback/state_grad",
+                           np.mean([r_ob.grad.abs().mean().item() for r_ob in r_obs]))
+        logger.record_mean("playback/action_grad",
+                           np.mean([r_act.grad.abs().mean().item() for r_act in r_acts]))
+
         logger.record_mean("train/E[R]", reward_sum.item())
-        logger.record_mean("train/entropy", entropy_sum.item())
+        logger.record_mean(
+            "train/entropy", (entropy_sum.item() / len(entropies)))
 
     def train_trans(self):
 
@@ -143,6 +151,11 @@ class VCA(OnPolicyAlgorithm):
         trans_loss.backward()
         self.trans_opt.step()
 
+        logger.record_mean("train/Transition MSE",
+                           torch.nn.functional.mse_loss(
+                               self.transition_module(state, action)[0],
+                               next_state
+                           ).item())
         logger.record_mean("train/Transition loss", trans_loss.item())
 
     @abstractmethod
@@ -167,7 +180,7 @@ class VCA(OnPolicyAlgorithm):
         return (action_set.reshape(1, -1) == action).float()
 
 
-class DiscerteStateVCA(VCA):
+class DiscreteStateVCA(VCA):
 
     def _init_soft_state(self, observations: torch.Tensor) -> torch.Tensor:
         soft_state = torch.ones(
@@ -196,6 +209,50 @@ class DiscerteStateVCA(VCA):
         trans_loss = torch.nn.functional.cross_entropy(
             next_state_pred, target_next_state)
         return trans_loss
+
+
+class ContinuousStateVCA(VCA):
+
+    def _init_soft_state(self, state: torch.Tensor) -> torch.Tensor:
+        return state
+
+    def _process_state(self, state: torch.Tensor):
+        return state
+
+    def _expected_reward(self,
+                         reward_info: Dict,
+                         r_next_state: torch.Tensor):
+
+        index = reward_info["index"]
+        upper_threshold = reward_info["upper_threshold"]
+        lower_threshold = reward_info["lower_threshold"]
+
+        value = 0.0
+        value = -1.0 if r_next_state[:, index] > upper_threshold else value
+        value = 1.0 if r_next_state[:, index] < lower_threshold else value
+
+        multiplier = torch.zeros_like(r_next_state)
+        multiplier[:, index] = value
+
+        return (r_next_state * multiplier).sum(1).mean(0)
+
+    # def _expected_reward(self,
+    #                      reward_info: Dict,
+    #                      r_next_state: torch.Tensor):
+
+    #     loss = -((r_next_state[:, 0] - 0.5)**2).mean(0)
+    #     # loss_upper = (r_next_state[:, 0] < 0.55).float()
+    #     # loss_lower = (0.45 < r_next_state[:, 0]).float()
+
+    #     # loss = ((loss_lower * loss_upper).detach() * r_next_state[:, 0]).mean()
+    #     return loss
+
+    def transition_loss(self,
+                        state: torch.Tensor,
+                        action: torch.Tensor,
+                        target_state: torch.Tensor):
+        dist = self.transition_module.dist(state, action)
+        return -dist.log_prob(target_state).mean()
 
 
 class GradNormalizer(torch.autograd.Function):

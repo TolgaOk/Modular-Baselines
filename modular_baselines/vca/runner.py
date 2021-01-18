@@ -57,7 +57,6 @@ class ExperimentRunner(ABC):
 
     def single_run(self, kwargs):
         algo = self.algo_generator(kwargs)
-        print(algo)
         algo.learn(kwargs["total_timesteps"])
 
     def tune(self, n_trials):

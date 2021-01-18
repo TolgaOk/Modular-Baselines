@@ -40,7 +40,7 @@ class BaseTransitionModule(torch.nn.Module, ABC):
     def __init__(self,
                  insize: int,
                  actsize: int,
-                 hidden_size: int = 16):
+                 hidden_size: int = 32):
         super().__init__()
 
         self.insize = insize
@@ -62,32 +62,48 @@ class BaseTransitionModule(torch.nn.Module, ABC):
         pass
 
 
-class ContinuousTransitionModule(BaseTransitionModule):
+class MultiHeadContinuousTransitionModule(BaseTransitionModule):
 
     def init_network(self):
-        self.act_fc = torch.nn.Linear(self.actsize, self.hidden_size)
-        self.hidden_fc = torch.nn.Linear(self.insize, self.hidden_size)
-        self.gru = torch.nn.GRUCell(self.hidden_size, self.hidden_size)
-        self.out_mean = torch.nn.Linear(self.hidden_size, self.insize)
-        self.out_std = torch.nn.Linear(self.hidden_size, self.insize)
+        self.hidden_in = torch.nn.Linear(self.insize, self.hidden_size)
+        self.hidden_out = torch.nn.Linear(self.hidden_size, self.hidden_size)
+        
+        
+        self.forget_gate = torch.nn.Linear(self.hidden_size, self.insize)
 
-    def forward(self, obs, act):
+        self.out_mean = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
+        self.out_std = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
 
-        act = torch.relu(self.act_fc(act))
-        obs = torch.relu(self.hidden_fc(obs))
-        hidden = self.gru(act, obs)
+    def forward(self, obs: torch.Tensor, act: torch.Tensor):
+        assert len(act.shape) == 2
+        assert act.shape[1] == self.actsize
 
-        mean = self.out_mean(hidden)
-        std = torch.nn.functional.softplus(self.out_std(hidden))
+        in_hidden = torch.relu(self.hidden_in(obs))
+        out_hidden = torch.relu(self.hidden_out(in_hidden))
+
+        forget = torch.sigmoid(self.forget_gate(in_hidden))
+        # out_hidden = out_hidden * hidden_forget + (1 - hidden_forget) * in_hidden
+
+        residual_mean = self.out_mean(out_hidden).reshape(-1, self.actsize, self.insize)
+        # std = torch.nn.functional.softplus(self.out_std(out_hidden)).reshape(-1, self.actsize, self.insize)
+
+        residual_mean = torch.einsum("bas,ba->bs", residual_mean, act)
+        # std = torch.einsum("bas,ba->bs", std, act)
+
+        # mean = residual_mean * forget + (1 - forget) * obs
+        mean = residual_mean + obs
+        std = torch.ones_like(mean) * 0.01
+
         return mean, std
 
     def dist(self, obs, act):
         mean, std = self(obs, act)
         dist = torch.distributions.normal.Normal(mean, std)
-
         return dist
 
-    def reparam(self, sample, mean, std):
+    def reparam(self, sample, dist):
+        mean = dist.loc
+        std = dist.scale
         diffable_sample = mean + std * \
             ((sample - mean) / (std + 1e-7)).detach()
         return diffable_sample
