@@ -98,25 +98,26 @@ class PongRunner(ExperimentRunner):
 
 
 def default_args(parser):
-    parser.add_argument("--buffer_size", help="",  type=int, default=10000)
+    parser.add_argument("--buffer_size", help="",  type=int, default=1000000)
     parser.add_argument("--batchsize", help="", type=int, default=32)
-    parser.add_argument("--rollout_len", help="", type=int, default=10)
+    parser.add_argument("--rollout_len", help="", type=int, default=50)
     parser.add_argument("--total_timesteps", help="",
-                        type=int, default=int(1e4))
-    parser.add_argument("--entropy_coef", help="", type=float, default=0.05)
-    parser.add_argument("--trans_weight_decay", help="", type=float, default=0.0)
+                        type=int, default=int(10e7))
+    parser.add_argument("--entropy_coef", help="", type=float, default=0.01)
+    parser.add_argument("--trans_weight_decay", help="", type=float, default=0.03)
 
     parser.add_argument("--use_gumbel", help="", action="store_true")
     parser.add_argument("--grad_norm", help="", action="store_true")
+    parser.add_argument("--grad_clip", help="", action="store_false")
 
     parser.add_argument("--policy_hidden_size", help="", type=int, default=64)
     parser.add_argument("--transition_hidden_size",
-                        help="", type=int, default=32)
+                        help="", type=int, default=64)
 
     parser.add_argument("--policy_tau", help="", type=float, default=1)
 
-    parser.add_argument("--policy_lr", help="", type=float, default=3e-3)
-    parser.add_argument("--trans_lr", help="", type=float, default=3e-2)
+    parser.add_argument("--policy_lr", help="", type=float, default=1e-3)
+    parser.add_argument("--trans_lr", help="", type=float, default=1e-3)
 
     parser.add_argument("--device", help="", type=str, default="cpu")
     parser.add_argument("--log_interval", help="", type=int, default=95)
@@ -126,6 +127,7 @@ def default_args(parser):
 
 
 def tune_args(parser):
+    parser.add_argument("--n_repeat", help="", type=int, default=5)
     parser.add_argument("--tune_batchsize", help="",
                         action="extend", nargs="+", type=int)
     parser.add_argument("--tune_rollout_len", help="",
@@ -142,12 +144,18 @@ def tune_args(parser):
                         help="", action="extend", nargs="+", type=int)
     parser.add_argument("--tune_trans_lr", help="",
                         action="extend", nargs="+", type=float)
+    parser.add_argument("--tune_trans_weight_decay", help="",
+                        action="extend", nargs="+", type=float)
+    parser.add_argument("--tune_trials", help="", type=int, default=None)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Maze VCA")
+    parser = argparse.ArgumentParser(description="PONG VCA")
     default_args(parser)
     tune_args(parser)
     args = vars(parser.parse_args())
 
-    PongRunner(args, n_repeat=5)()
+    if args["tune_trials"] is None:
+        PongRunner(args, args["n_repeat"])()
+    else:
+        PongRunner(args, args["n_repeat"]).tune(args["tune_trials"])
