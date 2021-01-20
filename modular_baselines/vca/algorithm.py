@@ -73,6 +73,8 @@ class VCA(OnPolicyAlgorithm):
         expected_rewards = []
         r_acts = []
         r_obs = []
+        gate_mean = []
+        gate_std = []
 
         r_state = self._init_soft_state(episode.observations[0].unsqueeze(0))
         r_state.requires_grad = True
@@ -90,6 +92,10 @@ class VCA(OnPolicyAlgorithm):
 
             r_action.retain_grad()
             r_acts.append(r_action)
+
+            gate_out = self.transition_module.gate_output(r_state, r_action).abs()
+            gate_mean.append(gate_out.mean().item())
+            gate_std.append(gate_out.std().item())
 
             dist = self.transition_module.dist(r_state, r_action)
             r_next_state = self.transition_module.reparam(
@@ -131,6 +137,8 @@ class VCA(OnPolicyAlgorithm):
                            np.mean([r_ob.grad.abs().mean().item() for r_ob in r_obs]))
         logger.record_mean("playback/action_grad",
                            np.mean([r_act.grad.abs().mean().item() for r_act in r_acts]))
+        logger.record_mean("playback/gate_mean", np.mean(gate_mean))
+        logger.record_mean("playback/gate_std", np.std(gate_std))
 
         logger.record_mean("train/E[R]", reward_sum.item())
         logger.record_mean(
@@ -219,33 +227,33 @@ class ContinuousStateVCA(VCA):
     def _process_state(self, state: torch.Tensor):
         return state
 
-    def _expected_reward(self,
-                         reward_info: Dict,
-                         r_next_state: torch.Tensor):
-
-        index = reward_info["index"]
-        upper_threshold = reward_info["upper_threshold"]
-        lower_threshold = reward_info["lower_threshold"]
-
-        value = 0.0
-        value = -1.0 if r_next_state[:, index] > upper_threshold else value
-        value = 1.0 if r_next_state[:, index] < lower_threshold else value
-
-        multiplier = torch.zeros_like(r_next_state)
-        multiplier[:, index] = value
-
-        return (r_next_state * multiplier).sum(1).mean(0)
-
     # def _expected_reward(self,
     #                      reward_info: Dict,
     #                      r_next_state: torch.Tensor):
 
-    #     loss = -((r_next_state[:, 0] - 0.5)**2).mean(0)
-    #     # loss_upper = (r_next_state[:, 0] < 0.55).float()
-    #     # loss_lower = (0.45 < r_next_state[:, 0]).float()
+    #     index = reward_info["index"]
+    #     upper_threshold = reward_info["upper_threshold"]
+    #     lower_threshold = reward_info["lower_threshold"]
 
-    #     # loss = ((loss_lower * loss_upper).detach() * r_next_state[:, 0]).mean()
-    #     return loss
+    #     value = 0.0
+    #     value = -1.0 if r_next_state[:, index] > upper_threshold else value
+    #     value = 1.0 if r_next_state[:, index] < lower_threshold else value
+
+    #     multiplier = torch.zeros_like(r_next_state)
+    #     multiplier[:, index] = value
+
+    #     return (r_next_state * multiplier).sum(1).mean(0)
+
+    def _expected_reward(self,
+                         reward_info: Dict,
+                         r_next_state: torch.Tensor):
+
+        loss = -((r_next_state[:, 0] - r_next_state[:, 3])**2).mean(0)
+        # loss_upper = (r_next_state[:, 0] < 0.55).float()
+        # loss_lower = (0.45 < r_next_state[:, 0]).float()
+
+        # loss = ((loss_lower * loss_upper).detach() * r_next_state[:, 0]).mean()
+        return loss
 
     def transition_loss(self,
                         state: torch.Tensor,

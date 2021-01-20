@@ -16,7 +16,7 @@ class PongEnv(gym.Env):
     def __init__(self,
                  envname="Pong-ramDeterministic-v4",
                  state_ix=[51, 50, 49, 54],
-                 action_ix=[2, 3],
+                 action_ix=[0, 2, 3],
                  aggr_ix=[2, 3],
                  skip_initial_n_steps=16):
         self.pong_env = self.make_pong_env(
@@ -63,7 +63,7 @@ class PongEnv(gym.Env):
     def make_pong_env(self,
                       envname="Pong-ramDeterministic-v4",
                       state_ix=[51, 50, 49, 54],
-                      action_ix=[2, 3],
+                      action_ix=[0, 2, 3],
                       aggr_ix=[2, 3],
                       skip_initial_n_steps=16):
 

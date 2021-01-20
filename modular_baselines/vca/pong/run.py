@@ -19,13 +19,15 @@ from modular_baselines.loggers.basic import(InitLogCallback,
                                             LogRolloutCallback,
                                             LogWeightCallback,
                                             LogGradCallback,
-                                            LogHyperparameters)
+                                            LogHyperparameters,
+                                            LogEvaluateCallback)
 
 from modular_baselines.vca.algorithm import ContinuousStateVCA
 from modular_baselines.vca.buffer import Buffer
 from modular_baselines.vca.collector import NStepCollector
 from modular_baselines.vca.modules import (CategoricalPolicyModule,
-                                           MultiHeadContinuousTransitionModule)
+                                           MultiHeadContinuousTransitionModule,
+                                           SoftLinearMultiHeadTransitionModule)
 from modular_baselines.vca.runner import ExperimentRunner
 from environment import PongEnv
 
@@ -45,6 +47,7 @@ class PongRunner(ExperimentRunner):
                                         args.log_dir)
         weight_callback = LogWeightCallback("weights.json")
         grad_callback = LogGradCallback("grads.json")
+        eval_callback = LogEvaluateCallback(args.eval_interval, env)
 
         buffer = Buffer(
             args.buffer_size,
@@ -77,7 +80,8 @@ class PongRunner(ExperimentRunner):
             rollout_len=args.rollout_len,
             trans_opt=torch.optim.RMSprop(
                 trans_m.parameters(),
-                lr=args.trans_lr),
+                lr=args.trans_lr,
+                weight_decay=args.trans_weight_decay),
             policy_opt=torch.optim.RMSprop(
                 policy_m.parameters(),
                 lr=args.policy_lr),
@@ -87,7 +91,8 @@ class PongRunner(ExperimentRunner):
             callbacks=[init_callback,
                        weight_callback,
                        grad_callback,
-                       hyper_callback],
+                       hyper_callback,
+                       eval_callback],
         )
         return algorithm
 
@@ -99,6 +104,7 @@ def default_args(parser):
     parser.add_argument("--total_timesteps", help="",
                         type=int, default=int(1e4))
     parser.add_argument("--entropy_coef", help="", type=float, default=0.05)
+    parser.add_argument("--trans_weight_decay", help="", type=float, default=0.0)
 
     parser.add_argument("--use_gumbel", help="", action="store_true")
     parser.add_argument("--grad_norm", help="", action="store_true")
@@ -114,6 +120,7 @@ def default_args(parser):
 
     parser.add_argument("--device", help="", type=str, default="cpu")
     parser.add_argument("--log_interval", help="", type=int, default=95)
+    parser.add_argument("--eval_interval", help="", type=int, default=495)
     parser.add_argument("--seed", help="", type=int, default=None)
     parser.add_argument("--log_dir", help="", type=str, default="logs/")
 

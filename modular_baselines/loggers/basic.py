@@ -1,6 +1,7 @@
 import time
 from collections import deque
 import numpy as np
+import torch
 import os
 import json
 from collections import defaultdict
@@ -176,4 +177,39 @@ class LogHyperparameters(BaseAlgorithmCallback):
 
     def _on_step(self, *args) -> None:
         pass
-    
+
+
+class LogEvaluateCallback(BaseAlgorithmCallback):
+
+    def __init__(self, eval_interval, env):
+        self.eval_interval = eval_interval
+        self.env = env
+
+    def _on_step(self, locals_) -> None:
+        
+        if locals_["iteration"] % self.eval_interval != 0:
+            return
+
+        policy = locals_["self"].policy_module
+        done = False
+        state = self.env.reset()
+
+        reward_list = []
+
+        while not done:
+            state = self.to_torch(state)
+            act = policy.net(state).argmax(1).item()
+            state, reward, done, _ = self.env.step(act)
+            reward_list.append(reward)
+
+        logger.record_mean("evaluation/reward", sum(reward_list)) 
+
+    def _on_training_start(self, *args) -> None:
+        pass
+
+    def _on_training_end(self, *args) -> None:
+        pass
+
+    @staticmethod
+    def to_torch(state):
+        return torch.from_numpy(state).unsqueeze(0)

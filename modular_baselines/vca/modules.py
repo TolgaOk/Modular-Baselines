@@ -65,14 +65,17 @@ class BaseTransitionModule(torch.nn.Module, ABC):
 class MultiHeadContinuousTransitionModule(BaseTransitionModule):
 
     def init_network(self):
-        self.hidden_in = torch.nn.Linear(self.insize, self.hidden_size)
-        self.hidden_out = torch.nn.Linear(self.hidden_size, self.hidden_size)
-        
-        
+        self.hidden_in = torch.nn.Linear(
+            self.insize, self.hidden_size, bias=True)
+        self.hidden_out = torch.nn.Linear(
+            self.hidden_size, self.hidden_size, bias=True)
+
         self.forget_gate = torch.nn.Linear(self.hidden_size, self.insize)
 
-        self.out_mean = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
-        self.out_std = torch.nn.Linear(self.hidden_size, self.insize * self.actsize)
+        self.out_mean = torch.nn.Linear(
+            self.hidden_size, self.insize * self.actsize, bias=True)
+        self.out_std = torch.nn.Linear(
+            self.hidden_size, self.insize * self.actsize, bias=True)
 
     def forward(self, obs: torch.Tensor, act: torch.Tensor):
         assert len(act.shape) == 2
@@ -82,19 +85,30 @@ class MultiHeadContinuousTransitionModule(BaseTransitionModule):
         out_hidden = torch.relu(self.hidden_out(in_hidden))
 
         forget = torch.sigmoid(self.forget_gate(in_hidden))
+        # forget = forget.reshape(-1, self.actsize, self.insize)
+        # forget = torch.einsum("bas,ba->bs", forget, act)
+
         # out_hidden = out_hidden * hidden_forget + (1 - hidden_forget) * in_hidden
 
-        residual_mean = self.out_mean(out_hidden).reshape(-1, self.actsize, self.insize)
+        residual_mean = self.out_mean(
+            out_hidden).reshape(-1, self.actsize, self.insize)
         # std = torch.nn.functional.softplus(self.out_std(out_hidden)).reshape(-1, self.actsize, self.insize)
 
         residual_mean = torch.einsum("bas,ba->bs", residual_mean, act)
         # std = torch.einsum("bas,ba->bs", std, act)
 
-        # mean = residual_mean * forget + (1 - forget) * obs
-        mean = residual_mean + obs
+        mean = residual_mean * forget + (1 - forget) * obs
+        # mean = residual_mean + obs
         std = torch.ones_like(mean) * 0.01
 
         return mean, std
+
+    def gate_output(self, obs: torch.Tensor, act: torch.Tensor):
+        in_hidden = torch.relu(self.hidden_in(obs))
+
+        forget = torch.sigmoid(self.forget_gate(in_hidden))
+
+        return forget
 
     def dist(self, obs, act):
         mean, std = self(obs, act)
@@ -107,6 +121,26 @@ class MultiHeadContinuousTransitionModule(BaseTransitionModule):
         diffable_sample = mean + std * \
             ((sample - mean) / (std + 1e-7)).detach()
         return diffable_sample
+
+
+class SoftLinearMultiHeadTransitionModule(MultiHeadContinuousTransitionModule):
+
+    def init_network(self):
+        self.hidden = SoftedParameterLinearLayer(self.insize, self.hidden_size)
+        self.out_mean = SoftedParameterLinearLayer(
+            self.hidden_size, self.insize * self.actsize)
+
+    def forward(self, obs: torch.Tensor, act: torch.Tensor):
+        mean = self.out_mean(self.hidden(obs))
+        mean = mean.reshape(-1, self.actsize, self.insize)
+        mean = torch.einsum("bas,ba->bs", mean, act)
+
+        std = torch.ones_like(mean) * 0.01
+
+        return mean, std
+
+    def gate_output(self, obs: torch.Tensor, act: torch.Tensor):
+        return obs
 
 
 class CategoricalTransitionModule(BaseTransitionModule):
@@ -214,3 +248,13 @@ def straight_through_reparam(logits, onehot_sample):
     probs = torch.nn.functional.softmax(logits, dim=1)
     r_prob = probs
     return onehot_sample + r_prob - r_prob.detach()
+
+
+class SoftedParameterLinearLayer(torch.nn.Linear):
+
+    def forward(self, input):
+        # See the autograd section for explanation of what happens here.
+        # y = xA^T + b
+        # Shape of A -> (d', d) where d' denotes the output dimension
+        soft_weight = torch.nn.functional.softmax(self.weight, dim=1)
+        return torch.nn.functional.linear(input, soft_weight, self.bias)
