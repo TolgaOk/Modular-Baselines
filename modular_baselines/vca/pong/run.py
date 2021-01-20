@@ -155,7 +155,10 @@ if __name__ == "__main__":
     tune_args(parser)
     args = vars(parser.parse_args())
 
-    if args["tune_trials"] is None:
-        PongRunner(args, args["n_repeat"])()
+    tune_trials = args.pop("tune_trials")
+    n_repeat = args.pop("n_repeat")
+
+    if tune_trials is None:
+        PongRunner(args, n_repeat)()
     else:
-        PongRunner(args, args["n_repeat"]).tune(args["tune_trials"])
+        PongRunner(args, n_repeat).tune(tune_trials)
