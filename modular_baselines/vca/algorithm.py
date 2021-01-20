@@ -56,6 +56,7 @@ class VCA(OnPolicyAlgorithm):
 
         self.verbose_playback = verbose_playback
         self.grad_norm = grad_norm
+        self.grad_clip = grad_clip
 
     def train(self):
         self.train_policy()
