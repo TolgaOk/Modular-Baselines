@@ -102,7 +102,7 @@ def default_args(parser):
     parser.add_argument("--batchsize", help="", type=int, default=32)
     parser.add_argument("--rollout_len", help="", type=int, default=50)
     parser.add_argument("--total_timesteps", help="",
-                        type=int, default=int(10e7))
+                        type=int, default=int(1e7))
     parser.add_argument("--entropy_coef", help="", type=float, default=0.01)
     parser.add_argument("--trans_weight_decay", help="", type=float, default=0.03)
 

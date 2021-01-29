@@ -32,7 +32,9 @@ class VCA(OnPolicyAlgorithm):
                  device: str = "cpu",
                  verbose_playback: bool = False,
                  grad_norm: bool = False,
-                 grad_clip: bool = False):
+                 grad_clip: bool = False,
+                 pg_optimization: bool = False,
+                 gamma=0.95):
         super().__init__(
             policy_module,
             buffer,
@@ -49,6 +51,7 @@ class VCA(OnPolicyAlgorithm):
         self.policy_opt = policy_opt
         self.batch_size = batch_size
         self.ent_coef = entropy_coef
+        self.gamma = gamma
 
         self.reward_vals = reward_vals
         self.policy = torch.nn.ModuleList([self.policy_module,
@@ -57,6 +60,7 @@ class VCA(OnPolicyAlgorithm):
         self.verbose_playback = verbose_playback
         self.grad_norm = grad_norm
         self.grad_clip = grad_clip
+        self.pg_optimization = pg_optimization
 
     def train(self):
         self.train_policy()
@@ -73,6 +77,7 @@ class VCA(OnPolicyAlgorithm):
 
         entropies = []
         expected_rewards = []
+        log_probs = []
         r_acts = []
         r_obs = []
         gate_mean = []
@@ -82,9 +87,13 @@ class VCA(OnPolicyAlgorithm):
         r_state.requires_grad = True
 
         for ix in range(len(episode.dones)):
+
             action = self._action_onehot(episode.actions[ix].unsqueeze(0))
             next_state = self._process_state(
                 episode.next_observations[ix].unsqueeze(0))
+
+            log_probs.append(self.policy_module.dist(
+                r_state.detach()).log_prob(episode.actions[ix]))
 
             r_action, entropy = self.policy_module.reparam_act(r_state, action)
 
@@ -99,9 +108,11 @@ class VCA(OnPolicyAlgorithm):
             r_action.retain_grad()
             r_acts.append(r_action)
 
-            gate_out = self.transition_module.gate_output(r_state, r_action).abs()
-            gate_mean.append(gate_out.mean().item())
-            gate_std.append(gate_out.std().item())
+            if "gate_output" in dir(self.transition_module):
+                gate_out = self.transition_module.gate_output(
+                    r_state, r_action).abs()
+                gate_mean.append(gate_out.mean().item())
+                gate_std.append(gate_out.std().item())
 
             dist = self.transition_module.dist(r_state, r_action)
             r_next_state = self.transition_module.reparam(
@@ -121,7 +132,15 @@ class VCA(OnPolicyAlgorithm):
         # reward_sum = expected_rewards[-1].sum()
         entropy_sum = sum(entropies).sum()
         self.policy_opt.zero_grad()
-        (-reward_sum - entropy_sum * self.ent_coef).backward()
+
+        eps_reward = episode.rewards
+        if self.pg_optimization:
+            log_prob_term = sum([logp * self.gamma**(ix)
+                                 for ix, logp in enumerate(reversed(log_probs))])
+            (-log_prob_term * eps_reward.sum().item() - entropy_sum * self.ent_coef).backward()
+        else:
+            (-sum(log_probs) * reward_sum.item() * 0.001 -
+             reward_sum - entropy_sum * self.ent_coef).backward()
 
         for param in self.policy_module.parameters():
             if torch.any(torch.isnan(param.grad)):
@@ -139,13 +158,16 @@ class VCA(OnPolicyAlgorithm):
 
         self.policy_opt.step()
 
-        logger.record_mean("playback/state_grad",
-                           np.mean([r_ob.grad.abs().mean().item() for r_ob in r_obs]))
-        logger.record_mean("playback/action_grad",
-                           np.mean([r_act.grad.abs().mean().item() for r_act in r_acts]))
-        logger.record_mean("playback/gate_mean", np.mean(gate_mean))
-        logger.record_mean("playback/gate_std", np.std(gate_std))
+        if self.pg_optimization is False:
+            logger.record_mean("playback/state_grad",
+                               np.mean([r_ob.grad.abs().mean().item() for r_ob in r_obs]))
+            logger.record_mean("playback/action_grad",
+                               np.mean([r_act.grad.abs().mean().item() for r_act in r_acts]))
+        if "gate_output" in dir(self.transition_module):
+            logger.record_mean("playback/gate_mean", np.mean(gate_mean))
+            logger.record_mean("playback/gate_std", np.std(gate_std))
 
+        logger.record_mean("train/log_probs", sum(log_probs).item())
         logger.record_mean("train/E[R]", reward_sum.item())
         logger.record_mean(
             "train/entropy", (entropy_sum.item() / len(entropies)))
@@ -274,6 +296,7 @@ class GradNormalizer(torch.autograd.Function):
     def backward(ctx, grad_output):
         norm = torch.norm(grad_output, dim=1, keepdim=True)
         return grad_output / norm
+
 
 class GradClip(torch.autograd.Function):
     @staticmethod

@@ -99,9 +99,10 @@ class Policy(torch.nn.Module):
 
 def run_experiment(args):
 
-    seed = args.seed
     if args.seed is None:
         seed = np.random.randint(0, 2**16)
+    else:
+        seed = args.seed
 
     # Logger Callbacks
     rollout_callback = LogRolloutCallback()

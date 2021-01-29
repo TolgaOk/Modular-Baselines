@@ -17,13 +17,30 @@ class MazeEnv(gym.Env):
                  "# P      #",
                  "##########"]
 
+    # world_map = ["##################################################",
+    #              "#   #       #       #         #         #        #",
+    #              "#P  #   #   #   #   #    #    #    #    #   #    #",
+    #              "#       #       #        #         #        #  @ #",
+    #              "##################################################"]
+
+    # world_map = ["#########################",
+    #              "#          #        @   #",
+    #              "#          #            #",
+    #              "#####                ####",
+    #              "#     ############      #",
+    #              "#     #    P#    #      #",
+    #              "#     #          #      #",
+    #              "#           #           #",
+    #              "#           #           #",
+    #              "#########################"]
+
     def __init__(self):
         self.colab_env = SimpleMaze(worldmap=self.world_map)
 
         state = self.colab_env.reset()
 
         state_idx = np.argwhere(state[0] == 0)
-        
+
         self.state_map = {tuple(cord): ix for ix, cord in enumerate(state_idx)}
         self.state_set = np.arange(len(state_idx))
         self.reward_set = np.array([0, 1], dtype="float32")
@@ -32,7 +49,7 @@ class MazeEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(n=4)
 
         goal_ix = np.argwhere(state[1] == 1)
-        self.goal_state = self.state_map[tuple(goal_ix[0])]        
+        self.goal_state = self.state_map[tuple(goal_ix[0])]
 
     def expected_reward(self):
         reward_arr = np.ones_like(self.state_set) * 0
@@ -41,7 +58,7 @@ class MazeEnv(gym.Env):
 
     def reset(self):
         return self.process_observation(self.colab_env.reset())
-        
+
     def process_observation(self, obs):
         state_idx = np.argwhere(obs[2] == 1)
         if len(state_idx.reshape(-1)) == 0:
@@ -64,7 +81,7 @@ if __name__ == "__main__":
 
     env.reset()
     for i in range(200):
-        state, reward, done, _  = env.step(env.action_space.sample())
+        state, reward, done, _ = env.step(env.action_space.sample())
         # env.render()
         # time.sleep(0.1)
         print(state, reward, done)

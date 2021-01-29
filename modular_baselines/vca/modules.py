@@ -12,15 +12,20 @@ class CategoricalPolicyModule(torch.nn.Module):
 
         self.net = torch.nn.Sequential(
             torch.nn.Linear(insize, hidden_size),
+            # torch.nn.Tanh(),
+            # torch.nn.Linear(hidden_size, hidden_size),
             torch.nn.Tanh(),
             torch.nn.Linear(hidden_size, actsize))
         self.tau = tau
 
     def forward(self, x):
-        logits = self.net(x)
-        hard_sample = torch.distributions.categorical.Categorical(
-            logits=logits).sample()
+        hard_sample = self.dist(x).sample()
         return hard_sample
+
+    def dist(self, x):
+        logits = self.net(x)
+        return torch.distributions.categorical.Categorical(
+            logits=logits)
 
     def reparam_act(self, obs, acts):
         logits = self.net(obs)
