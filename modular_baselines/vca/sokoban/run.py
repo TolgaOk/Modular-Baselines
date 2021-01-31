@@ -77,7 +77,8 @@ class ChannelRunner(ExperimentRunner):
             env=vecenv,
             buffer=buffer,
             policy=policy_m,
-            callbacks=[rollout_callback])
+            callbacks=[rollout_callback],
+            device=args.device)
         algorithm = ChannelStateVCA(
             policy_module=policy_m,
             transition_module=trans_m,
