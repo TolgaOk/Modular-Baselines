@@ -139,6 +139,9 @@ def default_args(parser):
 
 
 def tune_args(parser):
+    parser.add_argument("--n_repeat", help="", type=int, default=5)
+    parser.add_argument("--tune_trials", help="", type=int, default=None)
+
     parser.add_argument("--tune_batchsize", help="",
                         action="extend", nargs="+", type=int)
     parser.add_argument("--tune_rollout_len", help="",
@@ -165,4 +168,11 @@ if __name__ == "__main__":
     tune_args(parser)
     args = vars(parser.parse_args())
 
-    MazeRunner(args, n_repeat=5)()
+    tune_trials = args.pop("tune_trials")
+    n_repeat = args.pop("n_repeat")
+
+    if tune_trials is None:
+        MazeRunner(args, n_repeat)()
+    else:
+        MazeRunner(args, n_repeat).tune(tune_trials)
+
