@@ -183,9 +183,9 @@ class VCA(OnPolicyAlgorithm):
         if sample is None:
             return
 
-        state = self._process_state(sample.observations)
-        next_state = self._process_state(sample.next_observations)
-        action = self._action_onehot(sample.actions)
+        state = self._process_state(sample.observations.to(self.device))
+        next_state = self._process_state(sample.next_observations.to(self.device))
+        action = self._action_onehot(sample.actions.to(self.device))
 
         trans_loss = self.transition_loss(state, action, next_state)
         self.trans_opt.zero_grad()
