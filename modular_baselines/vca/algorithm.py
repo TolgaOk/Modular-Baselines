@@ -46,8 +46,8 @@ class VCA(OnPolicyAlgorithm):
             callbacks=callbacks,
         )
 
-        self.policy_module = policy_module
-        self.transition_module = transition_module
+        self.policy_module = policy_module.to(self.device)
+        self.transition_module = transition_module.to(self.device)
         self.trans_opt = trans_opt
         self.policy_opt = policy_opt
         self.batch_size = batch_size
