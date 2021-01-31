@@ -85,17 +85,17 @@ class VCA(OnPolicyAlgorithm):
         gate_mean = []
         gate_std = []
 
-        r_state = self._init_soft_state(episode.observations[0].unsqueeze(0))
+        r_state = self._init_soft_state(episode.observations[0].unsqueeze(0)).to(self.device)
         r_state.requires_grad = True
 
         for ix in range(len(episode.dones)):
 
-            action = self._action_onehot(episode.actions[ix].unsqueeze(0))
+            action = self._action_onehot(episode.actions[ix].unsqueeze(0).to(self.device))
             next_state = self._process_state(
-                episode.next_observations[ix].unsqueeze(0))
+                episode.next_observations[ix].unsqueeze(0).to(self.device))
 
             log_probs.append(self.policy_module.dist(
-                r_state.detach()).log_prob(episode.actions[ix]))
+                r_state.detach()).log_prob(episode.actions[ix].to(self.device)))
 
             r_action, entropy = self.policy_module.reparam_act(r_state, action)
 
@@ -217,7 +217,7 @@ class VCA(OnPolicyAlgorithm):
 
     def _action_onehot(self, action: torch.Tensor) -> torch.Tensor:
         assert len(action.shape) == 2, ""
-        action_set = torch.arange(self.env.action_space.n)
+        action_set = torch.arange(self.env.action_space.n).to(self.device)
         return (action_set.reshape(1, -1) == action).float()
 
 
@@ -238,7 +238,7 @@ class DiscreteStateVCA(VCA):
                          reward_arr: np.ndarray,
                          next_state_prob: torch.Tensor) -> torch.Tensor:
         assert len(next_state_prob.shape) == 2, ""
-        reward_tens = torch.from_numpy(reward_arr)
+        reward_tens = torch.from_numpy(reward_arr).to(self.device)
         return (reward_tens * next_state_prob).sum(1).mean(0)
 
     def transition_loss(self,
@@ -306,7 +306,7 @@ class ChannelStateVCA(ContinuousStateVCA):
                          reward_info: Dict,
                          r_next_state: torch.Tensor) -> torch.Tensor:
         index = reward_info["target_index"]
-        target = torch.from_numpy(reward_info["target"]).unsqueeze(0)
+        target = torch.from_numpy(reward_info["target"]).unsqueeze(0).to(self.device)
         return (r_next_state[:, index] * target).mean(0).sum()
 
     def transition_loss(self,
@@ -339,5 +339,5 @@ class GradClip(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         norm = torch.norm(grad_output, dim=1, keepdim=True)
-        norm = torch.maximum(norm, torch.ones_like(norm))
+        norm = torch.maximum(norm, torch.ones_like(norm).to(self.device))
         return grad_output / norm
