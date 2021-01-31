@@ -21,26 +21,33 @@ from modular_baselines.loggers.basic import(InitLogCallback,
                                             LogGradCallback,
                                             LogHyperparameters)
 
-from modular_baselines.vca.algorithm import DiscreteStateVCA
+from modular_baselines.vca.algorithm import DiscreteStateVCA, ChannelStateVCA 
 from modular_baselines.vca.buffer import Buffer
 from modular_baselines.vca.collector import NStepCollector
-from modular_baselines.vca.modules import (CategoricalPolicyModule,
+from modular_baselines.vca.modules import (ChannelPolicyModule,
                                            FullCategoricalTransitionModule,
                                            CategoricalTransitionModule,
+                                           MultiheadBernoulliTransitionModule,
                                            MultiheadCatgoricalTransitionModule)
 from modular_baselines.vca.runner import ExperimentRunner
-from environment import MazeEnv
+from modular_baselines.vca.maze.environment import ChannelMaze, MazeEnv
+from environment import Sokoban
 
 
-class MazeRunner(ExperimentRunner):
+class ChannelRunner(ExperimentRunner):
+
+    def make_env(self, envname):
+        if envname == "Sokoban":
+            return Sokoban()
+        return ChannelMaze(world_map=getattr(MazeEnv, envname))
 
     def algo_generator(self, args):
         args = namedtuple("Args", args.keys())(*args.values())
-        env = MazeEnv(world_map=getattr(MazeEnv, args.mazemap))
+        env = self.make_env(args.mazemap)
 
         set_random_seed(args.seed)
         vecenv = make_vec_env(
-            lambda: MazeEnv(world_map=getattr(MazeEnv, args.mazemap)),
+            lambda: self.make_env(args.mazemap),
             seed=args.seed)
 
         hyper_callback = LogHyperparameters(args._asdict())
@@ -55,26 +62,23 @@ class MazeRunner(ExperimentRunner):
             vecenv.observation_space,
             vecenv.action_space)
 
-        policy_m = CategoricalPolicyModule(
-            vecenv.observation_space.n,
+        policy_m = ChannelPolicyModule(
+            vecenv.observation_space.shape[0],
             vecenv.action_space.n,
-            args.policy_hidden_size,
-            tau=args.policy_tau,
-            use_gumbel=args.use_gumbel)
-        trans_m = FullCategoricalTransitionModule(
-            vecenv.observation_space.n,
+            hidden_size=args.policy_hidden_size,
+            kernel_size=args.policy_kernel_size)
+        trans_m = MultiheadBernoulliTransitionModule(
+            vecenv.observation_space.shape[0],
             vecenv.action_space.n,
-            state_set=torch.from_numpy(env.state_set),
-            hidden_size=args.transition_hidden_size,
-            tau=args.transition_module_tau,
-            use_gumbel=args.use_gumbel)
+            kernel_size=args.transition_kernel_size,
+            hidden_size=args.transition_hidden_size)
 
         collector = NStepCollector(
             env=vecenv,
             buffer=buffer,
             policy=policy_m,
             callbacks=[rollout_callback])
-        algorithm = DiscreteStateVCA(
+        algorithm = ChannelStateVCA(
             policy_module=policy_m,
             transition_module=trans_m,
             buffer=buffer,
@@ -94,13 +98,6 @@ class MazeRunner(ExperimentRunner):
                        grad_callback, hyper_callback]
         )
 
-        if args.ideal_logits:
-            ideal_logits = torch.from_numpy(env.get_ideal_logits()).float()
-            algorithm.transition_module.logits.data = ideal_logits
-
-            algorithm.trans_opt = torch.optim.RMSprop(
-                trans_m.parameters(), lr=0)
-
         return algorithm
 
 
@@ -118,12 +115,11 @@ def default_args(parser):
     parser.add_argument("--ideal_logits", help="", action="store_true")
 
     parser.add_argument("--policy_hidden_size", help="", type=int, default=64)
+    parser.add_argument("--policy_kernel_size", help="", type=int, default=3)
     parser.add_argument("--transition_hidden_size",
-                        help="", type=int, default=32)
-
-    parser.add_argument("--policy_tau", help="", type=float, default=1)
-    parser.add_argument("--transition_module_tau",
-                        help="", type=float, default=1)
+                        help="", type=int, default=60)
+    parser.add_argument("--transition_kernel_size",
+                        help="", type=int, default=3)
 
     parser.add_argument("--policy_lr", help="", type=float, default=3e-3)
     parser.add_argument("--trans_lr", help="", type=float, default=3e-2)
@@ -160,9 +156,9 @@ def tune_args(parser):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Maze VCA")
+    parser = argparse.ArgumentParser(description="Channel VCA")
     default_args(parser)
     tune_args(parser)
     args = vars(parser.parse_args())
 
-    MazeRunner(args, n_repeat=5)()
+    ChannelRunner(args, n_repeat=1)()

@@ -38,6 +38,7 @@ class ExperimentRunner(ABC):
 
         if kwargs["seed"] is None:
             kwargs["seed"] = np.random.randint(0, 2**20)
+        hyper_name = datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S-%f")
 
         processes = []
         for log_dir_suffix in range(1, self.n_repeat + 1):
@@ -46,7 +47,7 @@ class ExperimentRunner(ABC):
             args["log_dir"] = os.path.join(
                 kwargs["log_dir"],
                 self.log_dir_prefix,
-                datetime.datetime.now().strftime("%m-%d-%Y-%H-%M-%S-%f"),
+                hyper_name,
                 str(log_dir_suffix) if self.n_repeat != 1 else "")
             proc = Process(target=self.single_run, args=(args,))
             proc.start()

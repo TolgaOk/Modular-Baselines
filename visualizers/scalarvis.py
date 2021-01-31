@@ -20,6 +20,7 @@ from ipywidgets import (Button,
                         Image,
                         Output,
                         Dropdown,
+                        SelectMultiple,
                         Play,
                         FloatSlider,
                         jslink)
@@ -50,8 +51,20 @@ class ScalarRender():
     def _read_file(self):
         self.dataframe = pd.read_csv(self.progress_path)
 
+    def _get_monotonic_names(self):
+        monotonic_names = []
+        for name in self._get_column_names():
+            diff = np.diff(self.dataframe[name].to_numpy())
+            diff = diff[~np.isnan(diff)]
+            if np.all(diff >= 0):
+                monotonic_names.append(name)
+        return monotonic_names
+
+    def _get_column_names(self):
+        return list(self.dataframe.columns)
+
     def set_components(self):
-        names = list(self.dataframe.columns)
+        names = self._get_column_names()
 
         self.select_yaxis = Dropdown(
             options=names,
@@ -62,12 +75,7 @@ class ScalarRender():
         )
         self.select_yaxis.observe(self.set_y_axis)
 
-        monotonic_names = []
-        for name in names:
-            diff = np.diff(self.dataframe[name].to_numpy())
-            diff = diff[~np.isnan(diff)]
-            if np.all(diff >= 0):
-                monotonic_names.append(name)
+        monotonic_names = self._get_monotonic_names()
 
         self.select_xaxis = Dropdown(
             options=monotonic_names,
@@ -97,8 +105,8 @@ class ScalarRender():
 
         self.fig.add_trace(
             go.Scatter(
-                x = self.dataframe[self.x_name],
-                y = self.dataframe[self.y_name],
+                x=self.dataframe[self.x_name],
+                y=self.dataframe[self.y_name],
                 mode="lines",
                 line=dict(
                     # color="orange",
@@ -134,6 +142,35 @@ class ScalarRender():
         ))
         return out_display
 
+
+class ComparisonScalarRender(ScalarRender):
+
+    def __init__(self, logs_dir):
+        if not os.path.exists(logs_dir):
+            raise FileNotFoundError("Logs directory does not exist")
+
+        self.log_dirs = [name for name in os.listdir(logs_dir)
+                         if os.path.isdir(os.path.join(logs_dir, name))]
+        if len(self.log_dirs) == 0:
+            FileNotFoundError("Empty directory")
+
+        for dir_name in logs_dir:
+            pass
+
+    def set_components(self):
+        SelectMultiple(
+            options=self.log_dirs,
+            value=[],
+            #rows=10,
+            description="Logs",
+            disabled=False,
+            # layout=Layout(width="400px")
+        )
+        self.select_yaxis.observe(self.set_y_axis)
+
+        super().set_components()
+
+
 class MultiScalarRender(ScalarRender):
 
     def __init__(self, log_dir):
@@ -160,7 +197,6 @@ class MultiScalarRender(ScalarRender):
             showlegend=False)
         self.set_components()
 
-
     def set_components(self):
         names = tuple(self.dataframes[0].columns)
         for df in self.dataframes:
@@ -176,7 +212,7 @@ class MultiScalarRender(ScalarRender):
         )
         self.select_yaxis.observe(self.set_y_axis)
 
-        intersect_monotonic_names = set(names) 
+        intersect_monotonic_names = set(names)
         for df in self.dataframes:
             monotonic_names = []
             for name in names:
@@ -221,16 +257,19 @@ class MultiScalarRender(ScalarRender):
             return
         self.fig.data = []
 
-        y_values = np.stack([df[self.y_name].to_numpy() for df in self.dataframes], axis=0)
+        y_values = np.stack([df[self.y_name].to_numpy()
+                             for df in self.dataframes], axis=0)
 
         median = np.quantile(y_values, 0.5, interpolation="nearest", axis=0)
-        upper_quantile = np.quantile(y_values, 0.5 + self.quantile_value, interpolation="nearest", axis=0)
-        lower_quantile = np.quantile(y_values, 0.5 - self.quantile_value, interpolation="nearest", axis=0)
+        upper_quantile = np.quantile(
+            y_values, 0.5 + self.quantile_value, interpolation="nearest", axis=0)
+        lower_quantile = np.quantile(
+            y_values, 0.5 - self.quantile_value, interpolation="nearest", axis=0)
 
         self.fig.add_trace(
             go.Scatter(
-                x = self.dataframes[0][self.x_name],
-                y = upper_quantile,
+                x=self.dataframes[0][self.x_name],
+                y=upper_quantile,
                 mode="lines",
                 line=dict(
                     color="#82c0cc",
@@ -241,8 +280,8 @@ class MultiScalarRender(ScalarRender):
         )
         self.fig.add_trace(
             go.Scatter(
-                x = self.dataframes[0][self.x_name],
-                y = lower_quantile,
+                x=self.dataframes[0][self.x_name],
+                y=lower_quantile,
                 mode="lines",
                 fill="tonexty",
                 line=dict(
@@ -254,8 +293,8 @@ class MultiScalarRender(ScalarRender):
         )
         self.fig.add_trace(
             go.Scatter(
-                x = self.dataframes[0][self.x_name],
-                y = median,
+                x=self.dataframes[0][self.x_name],
+                y=median,
                 mode="lines",
                 line=dict(
                     color="#00509d",

@@ -34,7 +34,8 @@ class VCA(OnPolicyAlgorithm):
                  grad_norm: bool = False,
                  grad_clip: bool = False,
                  pg_optimization: bool = False,
-                 gamma=0.95):
+                 gamma=1,
+                 alpha=0.001):
         super().__init__(
             policy_module,
             buffer,
@@ -52,6 +53,7 @@ class VCA(OnPolicyAlgorithm):
         self.batch_size = batch_size
         self.ent_coef = entropy_coef
         self.gamma = gamma
+        self.alpha = alpha
 
         self.reward_vals = reward_vals
         self.policy = torch.nn.ModuleList([self.policy_module,
@@ -116,7 +118,8 @@ class VCA(OnPolicyAlgorithm):
 
             dist = self.transition_module.dist(r_state, r_action)
             r_next_state = self.transition_module.reparam(
-                next_state, dist)
+                obs=next_state,
+                probs=dist)
 
             r_next_state.retain_grad()
             r_obs.append(r_next_state)
@@ -137,9 +140,10 @@ class VCA(OnPolicyAlgorithm):
         if self.pg_optimization:
             log_prob_term = sum([logp * self.gamma**(ix)
                                  for ix, logp in enumerate(reversed(log_probs))])
-            (-log_prob_term * eps_reward.sum().item() - entropy_sum * self.ent_coef).backward()
+            (-log_prob_term * eps_reward.sum().item() -
+             entropy_sum * self.ent_coef).backward()
         else:
-            (-sum(log_probs) * reward_sum.item() * 0.001 -
+            (-sum(log_probs) * reward_sum.item() * self.alpha -
              reward_sum - entropy_sum * self.ent_coef).backward()
 
         for param in self.policy_module.parameters():
@@ -148,6 +152,7 @@ class VCA(OnPolicyAlgorithm):
                 # print(param)
                 for ix, r_act in enumerate(r_acts):
                     print(ix, r_act.grad)
+                print(param.grad)
                 raise RuntimeError("Nan observed!")
 
         if np.random.uniform() < 0.01 and self.verbose_playback:
@@ -189,7 +194,7 @@ class VCA(OnPolicyAlgorithm):
 
         logger.record_mean("train/Transition MSE",
                            torch.nn.functional.mse_loss(
-                               self.transition_module(state, action)[0],
+                               self.transition_module(state, action),
                                next_state
                            ).item())
         logger.record_mean("train/Transition loss", trans_loss.item())
@@ -255,22 +260,22 @@ class ContinuousStateVCA(VCA):
     def _process_state(self, state: torch.Tensor):
         return state
 
-    def _expected_reward(self,
-                         reward_info: Dict,
-                         r_next_state: torch.Tensor):
+    # def _expected_reward(self,
+    #                      reward_info: Dict,
+    #                      r_next_state: torch.Tensor):
 
-        index = reward_info["index"]
-        upper_threshold = reward_info["upper_threshold"]
-        lower_threshold = reward_info["lower_threshold"]
+    #     index = reward_info["index"]
+    #     upper_threshold = reward_info["upper_threshold"]
+    #     lower_threshold = reward_info["lower_threshold"]
 
-        value = 0.0
-        value = -1.0 if r_next_state[:, index] > upper_threshold else value
-        value = 1.0 if r_next_state[:, index] < lower_threshold else value
+    #     value = 0.0
+    #     value = -1.0 if r_next_state[:, index] > upper_threshold else value
+    #     value = 1.0 if r_next_state[:, index] < lower_threshold else value
 
-        multiplier = torch.zeros_like(r_next_state)
-        multiplier[:, index] = value
+    #     multiplier = torch.zeros_like(r_next_state)
+    #     multiplier[:, index] = value
 
-        return (r_next_state * multiplier).sum(1).mean(0)
+    #     return (r_next_state * multiplier).sum(1).mean(0)
 
     # def _expected_reward(self,
     #                      reward_info: Dict,
@@ -279,12 +284,40 @@ class ContinuousStateVCA(VCA):
     #     loss = -((r_next_state[:, 0] - r_next_state[:, 3])**2).mean(0)
     #     return loss
 
+    def _expected_reward(self,
+                         reward_info: Dict,
+                         r_next_state: torch.Tensor):
+
+        loss = -((r_next_state[:, 2])**2).mean()
+        # loss = r_next_state[: 0]
+        return loss
+
     def transition_loss(self,
                         state: torch.Tensor,
                         action: torch.Tensor,
                         target_state: torch.Tensor):
         dist = self.transition_module.dist(state, action)
         return -dist.log_prob(target_state).mean()
+
+
+class ChannelStateVCA(ContinuousStateVCA):
+
+    def _expected_reward(self,
+                         reward_info: Dict,
+                         r_next_state: torch.Tensor) -> torch.Tensor:
+        index = reward_info["target_index"]
+        target = torch.from_numpy(reward_info["target"]).unsqueeze(0)
+        return (r_next_state[:, index] * target).mean(0).sum()
+
+    def transition_loss(self,
+                        state: torch.Tensor,
+                        action: torch.Tensor,
+                        next_state: torch.Tensor) -> torch.Tensor:
+        next_state_pred = self.transition_module(state, action)
+        target_state = torch.abs(state - next_state).detach()
+        trans_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            next_state_pred, target_state)
+        return trans_loss
 
 
 class GradNormalizer(torch.autograd.Function):

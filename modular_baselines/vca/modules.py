@@ -41,6 +41,53 @@ class CategoricalPolicyModule(torch.nn.Module):
         return acts - soft_sample.detach() + soft_sample
 
 
+class ChannelPolicyModule(torch.nn.Module):
+    def __init__(self, inchannel, actsize, hidden_size, kernel_size):
+        super().__init__()
+
+        self.inchannel = inchannel
+        self.actsize = actsize
+        self.hidden_size = hidden_size
+        self.kernel_size = kernel_size
+
+        self.net = torch.nn.Sequential(
+            torch.nn.Conv2d(self.inchannel,
+                            self.hidden_size,
+                            self.kernel_size,
+                            padding=self.kernel_size//2,
+                            stride=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(self.hidden_size,
+                            self.hidden_size,
+                            self.kernel_size,
+                            padding=self.kernel_size//2,
+                            stride=2),
+            torch.nn.ReLU(),
+        )
+        self.head = torch.nn.Linear(self.hidden_size, self.actsize)
+
+    def _forward(self, x):
+        x = self.net(x)
+        x = torch.amax(x, dim=(2, 3))
+        x = self.head(x)
+        return x
+
+    def dist(self, x):
+        logits = self._forward(x)
+        dist = torch.distributions.categorical.Categorical(
+            logits=logits)
+        return dist
+
+    def forward(self, x):
+        return self.dist(x).sample()
+
+    def reparam_act(self, obs, act):
+        logits = self._forward(obs)
+        dist = torch.distributions.categorical.Categorical(
+            logits=logits)
+        return straight_through_reparam(logits, act), dist.entropy()
+
+
 class BaseTransitionModule(torch.nn.Module, ABC):
     def __init__(self,
                  insize: int,
@@ -120,11 +167,11 @@ class MultiHeadContinuousTransitionModule(BaseTransitionModule):
         dist = torch.distributions.normal.Normal(mean, std)
         return dist
 
-    def reparam(self, sample, dist):
-        mean = dist.loc
-        std = dist.scale
-        diffable_sample = mean + std * \
-            ((sample - mean) / (std + 1e-7)).detach()
+    def reparam(self, obs, probs, **kwargs):
+        mean = probs.loc
+        std = probs.scale
+        diffable_obs = mean + std * \
+            ((obs - mean) / (std + 1e-7)).detach()
         return diffable_sample
 
 
@@ -182,10 +229,10 @@ class CategoricalTransitionModule(BaseTransitionModule):
         logits = self(obs, act)
         return logits
 
-    def reparam(self, obs, logits):
+    def reparam(self, obs, probs, **kwargs):
         if self.use_gumbel:
-            return self._gumbel(obs, logits)
-        return straight_through_reparam(logits, obs)
+            return self._gumbel(obs, probs)
+        return straight_through_reparam(probs, obs)
 
     def _gumbel(self, obs, logits):
         soft_sample = torch.nn.functional.gumbel_softmax(
@@ -215,7 +262,7 @@ class MultiheadCatgoricalTransitionModule(CategoricalTransitionModule):
         probs = torch.einsum("bao,ba->bo", probs, act)
         return probs
 
-    def reparam(self, obs, probs):
+    def reparam(self, obs, probs, **kwargs):
         if self.use_gumbel:
             raise NotImplementedError
         assert len(probs.shape) == 2, "Logits must be 2D"
@@ -239,11 +286,108 @@ class FullCategoricalTransitionModule(MultiheadCatgoricalTransitionModule):
         probs = torch.nn.functional.softmax(self.logits, dim=-1)
         return self._forward(probs, obs, act)
 
-    def reparam(self, obs, probs):
+    def reparam(self, obs, probs, **kwargs):
         if self.use_gumbel:
             raise NotImplementedError
         assert len(probs.shape) == 2, "Logits must be 2D"
         return obs + probs - probs.detach()
+
+
+class BaseGate2d(torch.nn.Module):
+    def __init__(self, inchannel, outchannel, kernelsize):
+        assert max(inchannel, outchannel) % min(inchannel, outchannel) == 0, ""
+        super().__init__()
+        self.inchannel = inchannel
+        self.outchannel = outchannel
+        self.kernelsize = kernelsize
+
+        self.gate = torch.nn.Conv2d(self.inchannel,
+                                    self.outchannel,
+                                    self.kernelsize,
+                                    padding=self.kernelsize//2)
+        self.conv = torch.nn.Conv2d(self.inchannel,
+                                    self.outchannel,
+                                    self.kernelsize,
+                                    padding=self.kernelsize//2)
+
+    def forward(self, x):
+        pass
+
+
+class RisingGate2d(BaseGate2d):
+
+    def forward(self, x):
+        assert self.outchannel > self.inchannel
+        rate = self.outchannel // self.inchannel
+        gate = torch.sigmoid(self.gate(x))
+        out = self.conv(x)
+        x = x.repeat(1, rate, 1, 1)
+        return x * (1 - gate) + out * gate
+
+
+class FallingGate2d(BaseGate2d):
+
+    def forward(self, x):
+        assert self.outchannel < self.inchannel
+        rate = self.inchannel // self.outchannel
+        gate = torch.sigmoid(self.gate(x))
+        out = self.conv(x)
+        x = sum(x.split(self.outchannel, dim=1))
+        return x * (1 - gate) + out * gate
+
+
+class FlatGate2d(BaseGate2d):
+
+    def forward(self, x):
+        assert self.outchannel == self.inchannel
+        gate = torch.sigmoid(self.gate(x))
+        out = self.conv(x)
+        return x * (1 - gate) + out * gate
+
+
+class MultiheadBernoulliTransitionModule(torch.nn.Module):
+
+    def __init__(self,
+                 inchannel: int,
+                 actsize: int,
+                 kernel_size: int = 3,
+                 hidden_size: int = 64):
+        super().__init__()
+        self.inchannel = inchannel
+        self.actsize = actsize
+        self.kernel_size = kernel_size
+        self.hidden_size = hidden_size
+
+        self.init_network()
+
+    def init_network(self):
+        self.conv = torch.nn.Sequential(
+            RisingGate2d(self.inchannel,
+                         self.hidden_size,
+                         self.kernel_size),
+            torch.nn.ReLU(),
+            FlatGate2d(self.hidden_size,
+                                self.hidden_size,
+                                self.kernel_size),
+            torch.nn.ReLU(),
+            FallingGate2d(self.hidden_size,
+                                   self.actsize * self.inchannel,
+                                   self.kernel_size)
+        )
+
+    def forward(self, obs, act):
+        bs, _, width, height = obs.shape
+        logits = self.conv(obs).reshape(
+            bs, self.actsize, self.inchannel, width, height)
+        logits = torch.einsum("baswh, ba->bswh", logits, act)
+        return logits
+
+    def reparam(self, obs, probs):
+        probs = torch.sigmoid(probs)
+        return obs + probs - probs.detach()
+
+    def dist(self, obs, act):
+        return self(obs, act)
 
 
 def straight_through_reparam(logits, onehot_sample):

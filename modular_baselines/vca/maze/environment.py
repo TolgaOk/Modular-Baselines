@@ -1,21 +1,32 @@
-from gymcolab.envs.donut_world import DonutWorld
-from gymcolab.envs.simplemaze import SimpleMaze
-
 import numpy as np
 import gym
 import time
 import random
+from copy import deepcopy
+
+from gymcolab.envs.donut_world import DonutWorld
+from gymcolab.envs.simplemaze import SimpleMaze
 
 
 class MazeEnv(gym.Env):
 
-    world_map = ["##########",
-                 "#      @ #",
-                 "#        #",
-                 "##### ####",
-                 "#        #",
-                 "# P      #",
-                 "##########"]
+    little_world_map = ["##########",
+                        "#      @ #",
+                        "#        #",
+                        "##### ####",
+                        "#        #",
+                        "# P      #",
+                        "##########"]
+
+    medium_world_map = ["################",
+                        "#    @         #",
+                        "#              #",
+                        "########   #####",
+                        "#              #",
+                        "#####     ######",
+                        "#              #",
+                        "# P            #",
+                        "################"]
 
     # world_map = ["##################################################",
     #              "#   #       #       #         #         #        #",
@@ -34,9 +45,11 @@ class MazeEnv(gym.Env):
     #              "#           #           #",
     #              "#########################"]
 
-    def __init__(self):
-        self.colab_env = SimpleMaze(worldmap=self.world_map)
-
+    def __init__(self, world_map=None):
+        if world_map is None:
+            world_map = MazeEnv.little_world_map
+        self.colab_env = SimpleMaze(worldmap=world_map)
+        self.world_map = world_map
         state = self.colab_env.reset()
 
         state_idx = np.argwhere(state[0] == 0)
@@ -54,6 +67,7 @@ class MazeEnv(gym.Env):
     def expected_reward(self):
         reward_arr = np.ones_like(self.state_set) * 0
         reward_arr[self.goal_state] = 1
+
         return reward_arr
 
     def reset(self):
@@ -74,6 +88,53 @@ class MazeEnv(gym.Env):
 
     def render(self):
         self.colab_env.render()
+
+    def get_ideal_logits(self):
+        ideal_logits = np.zeros((self.observation_space.n,
+                                 self.action_space.n,
+                                 self.observation_space.n))
+
+        empty_world_map = deepcopy(self.world_map)
+        p_pos_y, p_pos_x = np.argwhere(
+            np.array([list(row) for row in empty_world_map]) == "P")[0]
+        row = list(empty_world_map[p_pos_y])
+        row[p_pos_x] = " "
+        empty_world_map[p_pos_y] = "".join(row)
+
+        for (pos_y, pos_x), state_ix in self.state_map.items():
+            world_map = deepcopy(empty_world_map)
+            row = list(world_map[pos_y])
+            row[pos_x] = "P"
+            world_map[pos_y] = "".join(row)
+
+            for act_ix in range(self.action_space.n):
+                maze_env = SimpleMaze(worldmap=world_map)
+                maze_env.reset()
+                player_pos = tuple(np.argwhere(
+                    maze_env.step(act_ix)[0][2] == 1)[0])
+                ideal_logits[state_ix][act_ix][self.state_map[player_pos]] = 10
+        return ideal_logits
+
+
+class ChannelMaze(gym.Env):
+
+    def __init__(self, world_map=MazeEnv.little_world_map):
+        self.env = SimpleMaze(worldmap=world_map)
+
+        self.observation_space = self.env.observation_space
+        self.action_space = gym.spaces.Discrete(n=4)
+
+    def reset(self):
+        return self.env.reset()
+
+    def step(self, act):
+        if "item" in dir(act):
+            act = act.item()
+        return self.env.step(act)
+
+    def expected_reward(self):
+        return {"target": self.env.reset()[1],
+                "target_index": 2}
 
 
 if __name__ == "__main__":
