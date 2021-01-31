@@ -339,5 +339,5 @@ class GradClip(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         norm = torch.norm(grad_output, dim=1, keepdim=True)
-        norm = torch.maximum(norm, torch.ones_like(norm).to(self.device))
+        norm = torch.maximum(norm, torch.ones_like(norm))
         return grad_output / norm
