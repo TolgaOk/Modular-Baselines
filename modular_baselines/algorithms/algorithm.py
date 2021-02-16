@@ -45,7 +45,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                  rollout_len: int,
                  callbacks: List[BaseAlgorithmCallback] = [],
                  device: str = "cpu"):
-        self.policy = policy.to(self.device)
+        self.policy = policy.to(device)
         self.buffer = buffer
         self.collector = collector
         self.env = env
