@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 class BaseExperimentRunner(ABC):
 
-    def __init__(self, args, n_seeds):
+    def __init__(self, args, runs_per_job):
         if args["log_dir"] is None:
             args["log_dir"] = TemporaryDirectory().name
             warnings.warn(
@@ -14,7 +14,7 @@ class BaseExperimentRunner(ABC):
                     args["log_dir"]))
 
         self.log_dir_prefix = self.current_time()
-        self.n_seeds = n_seeds
+        self.runs_per_job = runs_per_job
         self.args = args
 
     @staticmethod

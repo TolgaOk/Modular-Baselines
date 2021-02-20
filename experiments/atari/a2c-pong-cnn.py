@@ -9,6 +9,7 @@ from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.env_util import make_atari_env
 from stable_baselines3.common.vec_env.vec_frame_stack import VecFrameStack
 from stable_baselines3.common.vec_env.vec_transpose import VecTransposeImage
+from stable_baselines3.common.policies import ActorCriticCnnPolicy
 
 from modular_baselines.buffers.buffer import RolloutBuffer
 from modular_baselines.collectors.collector import OnPolicyCollector
@@ -69,9 +70,9 @@ class Policy(torch.nn.Module):
         flatten_size = 7 * 7 * 64
         self.action_layers = torch.nn.Sequential(
             torch.nn.Linear(flatten_size, hidden_size),
-            torch.nn.Tanh(),
+            torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, hidden_size),
-            torch.nn.Tanh(),
+            torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, action_space.n)
         )
         self.value_layers = torch.nn.Sequential(
@@ -123,14 +124,14 @@ def run(args):
     hyper_callback = LogHyperparameters(args._asdict())
     rollout_callback = LogRolloutCallback()
     learn_callback = InitLogCallback(args.log_interval,
-                                    args.log_dir)
+                                     args.log_dir)
     weight_callback = LogWeightCallback("weights.json")
     grad_callback = LogGradCallback("grads.json")
 
     # Environment
     vecenv = make_env(n_envs=args.n_envs,
-                    seed=seed,
-                    n_stack=args.n_stack)
+                      seed=seed,
+                      n_stack=args.n_stack)
 
     # Policy
     policy = Policy(vecenv.observation_space,
@@ -139,20 +140,30 @@ def run(args):
                     lr=args.lr,
                     rms_prob_eps=args.rms_prop_eps)
 
+    # Stable baseline_policy
+    if args.sb3_policy:
+        print("Using SB3 policy with {} initialization!".format(
+            "ortho" if args.ortho_init else: "default"))
+        policy = ActorCriticCnnPolicy(
+            vecenv.observation_space,
+            vecenv.action_space,
+            lambda x: args.lr,
+            ortho_init=args.ortho_init)
+
     # Modules
     buffer = RolloutBuffer(buffer_size=args.n_steps,
-                        observation_space=vecenv.observation_space,
-                        action_space=vecenv.action_space,
-                        device=args.device,
-                        gae_lambda=args.gae_lambda,
-                        gamma=args.gamma,
-                        n_envs=args.n_envs)
+                           observation_space=vecenv.observation_space,
+                           action_space=vecenv.action_space,
+                           device=args.device,
+                           gae_lambda=args.gae_lambda,
+                           gamma=args.gamma,
+                           n_envs=args.n_envs)
     # Collector
     collector = OnPolicyCollector(env=vecenv,
-                                buffer=buffer,
-                                policy=policy,
-                                callbacks=[rollout_callback],
-                                device=args.device)
+                                  buffer=buffer,
+                                  policy=policy,
+                                  callbacks=[rollout_callback],
+                                  device=args.device)
     # Model
     model = A2C(policy=policy,
                 rollout_buffer=buffer,
@@ -164,19 +175,20 @@ def run(args):
                 max_grad_norm=args.max_grad_norm,
                 normalize_advantage=False,
                 callbacks=[learn_callback,
-                        weight_callback,
-                        grad_callback,
-                        hyper_callback],
+                           weight_callback,
+                           grad_callback,
+                           hyper_callback],
                 device=args.device)
 
     # Start learning
     model.learn(args.total_timesteps)
     return model
 
+
 class PongA2cMultiSeed(MultiSeedRunner):
 
     def single_run(self, args: namedtuple):
-        run(args)
+        return run(args)
 
 
 if __name__ == "__main__":
@@ -217,17 +229,20 @@ if __name__ == "__main__":
                               " iterations"))
     parser.add_argument("--log-dir", type=str, default=None,
                         help=("Logging dir"))
+    parser.add_argument("--sb3-policy", action=store_true,
+                        help="Use SB3 policy")
+    parser.add_argument("--ortho_init", action=store_true,
+                        help="Use orthogonal initialization in the policy")
 
     parser.add_argument("--n-jobs", type=int, default=1,
                         help="Number of parallelized jobs for experiments")
-    parser.add_argument("--n-seeds", type=int, default=1,
+    parser.add_argument("--runs-per-job", type=int, default=1,
                         help="Number of parallelized jobs for experiments")
 
     args = parser.parse_args()
     args = vars(args)
-    print(list(args.keys()))
 
-    n_seeds = args.pop("n_seeds")
+    runs_per_job = args.pop("runs_per_job")
     n_jobs = args.pop("n_jobs")
 
-    PongA2cMultiSeed(args, n_seeds=n_seeds).run(n_jobs=n_jobs)
+    PongA2cMultiSeed(args, runs_per_job=runs_per_job).run(n_jobs=n_jobs)

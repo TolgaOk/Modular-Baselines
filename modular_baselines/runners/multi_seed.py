@@ -9,6 +9,7 @@ from collections import namedtuple
 from abc import ABC, abstractmethod
 from multiprocessing import Process
 import optuna
+import time
 from typing import Dict
 
 from modular_baselines.runners.base import BaseExperimentRunner
@@ -16,13 +17,47 @@ from modular_baselines.runners.base import BaseExperimentRunner
 
 class MultiSeedRunner(BaseExperimentRunner):
 
-    def __init__(self, args: Dict, n_seeds: int):
-        super().__init__(args, n_seeds)
+    def __init__(self, args: Dict, runs_per_job: int):
+        super().__init__(args, runs_per_job)
 
     def run(self, n_jobs=1):
+        abs_path = os.path.abspath(os.path.dirname(self.args["log_dir"]))
+        log_dir_path = os.path.join(
+            abs_path,
+            self.args["log_dir"],
+            self.log_dir_prefix,)
+        os.makedirs(log_dir_path, exist_ok=True)
+        storage_url = "".join(("sqlite:///", os.path.join(
+            log_dir_path,
+            "store.db")))
+        optuna.create_study(
+            storage=storage_url,
+            study_name=self.log_dir_prefix)
+
+        if n_jobs == 1:
+            return self._run()
+
+        processes = []
+        for job_ix in range(n_jobs):
+            proc = Process(target=self._run, args=(storage_url,))
+            proc.start()
+            processes.append(proc)
+
+        for proc in processes:
+            proc.join()
+
+    def _run(self, storage_url):
         sampler = optuna.samplers.RandomSampler()
-        study = optuna.create_study(sampler=sampler)
-        study.optimize(self.objective, n_trials=self.n_seeds, n_jobs=n_jobs)
+
+        # print(storage_url)
+        # return
+        study = optuna.load_study(
+            study_name=self.log_dir_prefix,
+            sampler=sampler,
+            storage=storage_url)
+        study.optimize(
+            self.objective,
+            n_trials=self.runs_per_job)
 
     def objective(self, trial: optuna.Trial):
         args = deepcopy(self.args)
