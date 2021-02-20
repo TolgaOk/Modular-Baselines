@@ -35,7 +35,7 @@ class MultiSeedRunner(BaseExperimentRunner):
             study_name=self.log_dir_prefix)
 
         if n_jobs == 1:
-            return self._run()
+            return self._run(storage_url)
 
         processes = []
         for job_ix in range(n_jobs):

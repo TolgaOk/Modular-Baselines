@@ -143,7 +143,7 @@ def run(args):
     # Stable baseline_policy
     if args.sb3_policy:
         print("Using SB3 policy with {} initialization!".format(
-            "ortho" if args.ortho_init else: "default"))
+            "ortho" if args.ortho_init else "default"))
         policy = ActorCriticCnnPolicy(
             vecenv.observation_space,
             vecenv.action_space,
@@ -229,9 +229,9 @@ if __name__ == "__main__":
                               " iterations"))
     parser.add_argument("--log-dir", type=str, default=None,
                         help=("Logging dir"))
-    parser.add_argument("--sb3-policy", action=store_true,
+    parser.add_argument("--sb3-policy", action="store_true",
                         help="Use SB3 policy")
-    parser.add_argument("--ortho_init", action=store_true,
+    parser.add_argument("--ortho_init", action="store_true",
                         help="Use orthogonal initialization in the policy")
 
     parser.add_argument("--n-jobs", type=int, default=1,
