@@ -3,6 +3,7 @@ import gym
 import torch
 import numpy as np
 import argparse
+from functools import partial
 from collections import namedtuple
 
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
@@ -44,11 +45,13 @@ class Policy(torch.nn.Module):
                  action_space: gym.spaces.Discrete,
                  hidden_size: int = 128,
                  lr=1e-3,
-                 rms_prob_eps=1e-5):
+                 rms_prob_eps=1e-5,
+                 ortho_init=True):
         super().__init__()
         self.observation_space = observation_space
         self.action_space = action_space
         self.hidden_size = hidden_size
+        self.ortho_init = ortho_init
 
         if not isinstance(observation_space, gym.spaces.Box):
             raise ValueError("Unsupported observation space {}".format(
@@ -66,24 +69,30 @@ class Policy(torch.nn.Module):
             torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             torch.nn.ReLU(),
             torch.nn.Flatten(),
+            torch.nn.Linear(7 * 7 * 64, 512)
         )
-        flatten_size = 7 * 7 * 64
         self.action_layers = torch.nn.Sequential(
-            torch.nn.Linear(flatten_size, hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.Linear(512, hidden_size),
             torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, action_space.n)
         )
         self.value_layers = torch.nn.Sequential(
-            torch.nn.Linear(flatten_size, hidden_size),
-            torch.nn.Tanh(),
-            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.Linear(512, hidden_size),
             torch.nn.Tanh(),
             torch.nn.Linear(hidden_size, 1)
         )
 
-        self.optimizer = torch.optim.RMSprop(self.parameters(),
+        if self.ortho_init:
+            module_gains = {
+                self.action_layers: np.sqrt(2),
+                self.action_layers: 0.01,
+                self.value_layers: 1,
+            }
+            for module, gain in module_gains.items():
+                module.apply(
+                    partial(ActorCriticCnnPolicy.init_weights, gain=gain))
+
+        self.optimizer = torch.optim.Adam(self.parameters(),
                                              lr=lr,
                                              eps=rms_prob_eps)
 
@@ -138,7 +147,8 @@ def run(args):
                     vecenv.action_space,
                     hidden_size=args.hiddensize,
                     lr=args.lr,
-                    rms_prob_eps=args.rms_prop_eps)
+                    rms_prob_eps=args.rms_prop_eps,
+                    ortho_init=args.ortho_init)
 
     # Stable baseline_policy
     if args.sb3_policy:
