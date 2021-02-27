@@ -69,7 +69,8 @@ class Policy(torch.nn.Module):
             torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             torch.nn.ReLU(),
             torch.nn.Flatten(),
-            torch.nn.Linear(7 * 7 * 64, 512)
+            torch.nn.Linear(7 * 7 * 64, 512),
+            torch.nn.ReLU()
         )
         self.action_layers = torch.nn.Sequential(
             torch.nn.Linear(512, hidden_size),
@@ -78,11 +79,12 @@ class Policy(torch.nn.Module):
         )
         self.value_layers = torch.nn.Sequential(
             torch.nn.Linear(512, hidden_size),
-            torch.nn.Tanh(),
+            torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, 1)
         )
 
         if self.ortho_init:
+            # Taken from SB3 ActorCriticPolicy class
             module_gains = {
                 self.action_layers: np.sqrt(2),
                 self.action_layers: 0.01,
