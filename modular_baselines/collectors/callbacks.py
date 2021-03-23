@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
+from abc import abstractmethod
+from typing import Dict, Any
 
 from stable_baselines3.common.callbacks import BaseCallback
 

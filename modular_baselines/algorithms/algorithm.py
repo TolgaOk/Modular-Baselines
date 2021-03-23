@@ -66,6 +66,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         for callback in self.callbacks:
             callback.on_training_start(locals())
 
+        # Start one step ahead so that next-values are calculated
+        self.collector.collect(1)
         while num_timesteps < total_timesteps:
 
             num_timesteps = self.collector.collect(self.rollout_len)

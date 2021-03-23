@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 setup(
     # Metadata
     name="modular_baselines",
-    version="0.1.0a",
+    version="0.1.1",
     author="Tolga Ok",
     author_email="okt@itu.edu.tr",
     url="",
@@ -18,7 +18,7 @@ setup(
     license="MIT",
 
     # Package info
-    packages=["modular_baselines", ],
+    packages=["modular_baselines"],
     install_requires=[
     ],
     zip_safe=False

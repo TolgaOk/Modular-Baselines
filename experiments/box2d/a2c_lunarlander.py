@@ -7,15 +7,16 @@ from functools import partial
 from collections import namedtuple
 
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
-from stable_baselines3.common.env_util import make_atari_env
+from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env.vec_frame_stack import VecFrameStack
 from stable_baselines3.common.vec_env.vec_transpose import VecTransposeImage
 from stable_baselines3.common.policies import ActorCriticCnnPolicy
 
-from modular_baselines.buffers.buffer import RolloutBuffer
+from modular_baselines.buffers.buffer import RolloutBuffer, GeneralBuffer
 from modular_baselines.collectors.collector import OnPolicyCollector
 from modular_baselines.algorithms.a2c import A2C
 from modular_baselines.runners.multi_seed import MultiSeedRunner
+from modular_baselines.utils.score import log_score
 from modular_baselines.loggers.basic import(InitLogCallback,
                                             LogRolloutCallback,
                                             LogWeightCallback,
@@ -25,16 +26,12 @@ from modular_baselines.loggers.basic import(InitLogCallback,
 
 def make_env(n_envs: int,
              seed: int,
-             n_stack: int,
-             envname: str = "PongNoFrameskip-v4"):
+             envname: str = "LunarLander-v2"):
 
-    env = make_atari_env(env_id=envname,
-                         n_envs=n_envs,
-                         seed=seed,
-                         vec_env_cls=SubprocVecEnv)
-    env = VecFrameStack(env, n_stack=n_stack)
-    env = VecTransposeImage(env)
-
+    env = make_vec_env(env_id=envname,
+                       n_envs=n_envs,
+                       seed=seed,
+                       vec_env_cls=SubprocVecEnv)
     return env
 
 
@@ -60,29 +57,24 @@ class Policy(torch.nn.Module):
             raise ValueError("Unsupported action space {}".format(
                 observation_space))
 
-        self.cnn = torch.nn.Sequential(
-            torch.nn.Conv2d(observation_space.shape[0], 32,
-                            kernel_size=8, stride=4, padding=0),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            torch.nn.ReLU(),
-            torch.nn.Flatten(),
-            torch.nn.Linear(7 * 7 * 64, 512),
-            torch.nn.ReLU()
-        )
         self.action_layers = torch.nn.Sequential(
-            torch.nn.Linear(512, action_space.n)
+            torch.nn.Linear(observation_space.shape[0], hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, action_space.n),
         )
         self.value_layers = torch.nn.Sequential(
-            torch.nn.Linear(512, 1)
+            torch.nn.Linear(observation_space.shape[0], hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, 1),
         )
 
         if self.ortho_init:
             # Taken from SB3 ActorCriticPolicy class
             module_gains = {
-                self.cnn: np.sqrt(2),
                 self.action_layers: 0.01,
                 self.value_layers: 1,
             }
@@ -91,22 +83,20 @@ class Policy(torch.nn.Module):
                     partial(ActorCriticCnnPolicy.init_weights, gain=gain))
 
         self.optimizer = torch.optim.Adam(self.parameters(),
-                                             lr=lr,
-                                             eps=rms_prob_eps)
+                                          lr=lr,
+                                          eps=rms_prob_eps)
 
-    def _forward(self, x):
-        x = self._preprocess(x)
-        features = self.cnn(x)
-
-        act_logit = self.action_layers(features)
-        values = self.value_layers(features)
+    def _forward(self, tensor):
+        processed_tensor = self._preprocess(tensor)
+        act_logit = self.action_layers(processed_tensor)
+        values = self.value_layers(processed_tensor)
         return act_logit, values
 
-    def _preprocess(self, x):
-        return x.float() / 255
+    def _preprocess(self, tensor):
+        return tensor.float()
 
-    def forward(self, x):
-        act_logit, values = self._forward(x)
+    def forward(self, tensor):
+        act_logit, values = self._forward(tensor)
 
         dist = torch.distributions.categorical.Categorical(logits=act_logit)
         action = dist.sample()
@@ -137,8 +127,7 @@ def run(args):
 
     # Environment
     vecenv = make_env(n_envs=args.n_envs,
-                      seed=seed,
-                      n_stack=args.n_stack)
+                      seed=seed)
 
     # Policy
     policy = Policy(vecenv.observation_space,
@@ -148,24 +137,13 @@ def run(args):
                     rms_prob_eps=args.rms_prop_eps,
                     ortho_init=args.ortho_init)
 
-    # Stable baseline_policy
-    if args.sb3_policy:
-        print("Using SB3 policy with {} initialization!".format(
-            "ortho" if args.ortho_init else "default"))
-        policy = ActorCriticCnnPolicy(
-            vecenv.observation_space,
-            vecenv.action_space,
-            lambda x: args.lr,
-            ortho_init=args.ortho_init)
-
     # Modules
-    buffer = RolloutBuffer(buffer_size=args.n_steps,
+    buffer = GeneralBuffer(buffer_size=args.n_steps + 1,
                            observation_space=vecenv.observation_space,
                            action_space=vecenv.action_space,
                            device=args.device,
-                           gae_lambda=args.gae_lambda,
-                           gamma=args.gamma,
                            n_envs=args.n_envs)
+
     # Collector
     collector = OnPolicyCollector(env=vecenv,
                                   buffer=buffer,
@@ -180,6 +158,9 @@ def run(args):
                 env=vecenv,
                 ent_coef=args.ent_coef,
                 vf_coef=args.val_coef,
+                gae_lambda=args.gae_lambda,
+                gamma=args.gamma,
+                batch_size=args.batch_size,
                 max_grad_norm=args.max_grad_norm,
                 normalize_advantage=False,
                 callbacks=[learn_callback,
@@ -190,10 +171,11 @@ def run(args):
 
     # Start learning
     model.learn(args.total_timesteps)
-    return model
+
+    return log_score(args.log_dir)
 
 
-class PongA2cMultiSeed(MultiSeedRunner):
+class LunarA2Crunner(MultiSeedRunner):
 
     def single_run(self, args: namedtuple):
         return run(args)
@@ -201,7 +183,7 @@ class PongA2cMultiSeed(MultiSeedRunner):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pong-Ram A2C")
-    parser.add_argument("--n-envs", type=int, default=16,
+    parser.add_argument("--n-envs", type=int, default=8,
                         help="Number of parallel environments")
     parser.add_argument("--seed", type=int, default=None,
                         help="Global seed")
@@ -211,17 +193,15 @@ if __name__ == "__main__":
                         help="Hidden size of the policy")
     parser.add_argument("--n-steps", type=int, default=5,
                         help="Rollout Length")
-    parser.add_argument("--n-stack", type=int, default=4,
-                        help="Frame stack")
-    parser.add_argument("--batchsize", type=int, default=32,
-                        help="Batch size of the a2c training")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="Batchsize of a parameter update")
     parser.add_argument("--gae-lambda", type=float, default=1.0,
                         help="GAE coefficient")
-    parser.add_argument("--lr", type=float, default=7e-4,
+    parser.add_argument("--lr", type=float, default=0.00083,
                         help="Learning rate")
-    parser.add_argument("--gamma", type=float, default=0.99,
+    parser.add_argument("--gamma", type=float, default=0.995,
                         help="Discount factor")
-    parser.add_argument("--ent-coef", type=float, default=0.01,
+    parser.add_argument("--ent-coef", type=float, default=0.05,
                         help="Entropy coefficient")
     parser.add_argument("--val-coef", type=float, default=0.25,
                         help="Value loss coefficient")
@@ -229,16 +209,14 @@ if __name__ == "__main__":
                         help="RmsProp epsion coefficient")
     parser.add_argument("--max-grad-norm", type=float, default=0.5,
                         help="Maximum allowed graident norm")
-    parser.add_argument("--total-timesteps", type=int, default=int(1e7),
+    parser.add_argument("--total-timesteps", type=int, default=int(4e5),
                         help=("Training length interms of cumulative"
                               " environment timesteps"))
-    parser.add_argument("--log-interval", type=int, default=1000,
+    parser.add_argument("--log-interval", type=int, default=500,
                         help=("Logging interval in terms of training"
                               " iterations"))
     parser.add_argument("--log-dir", type=str, default=None,
                         help=("Logging dir"))
-    parser.add_argument("--sb3-policy", action="store_true",
-                        help="Use SB3 policy")
     parser.add_argument("--ortho_init", action="store_true",
                         help="Use orthogonal initialization in the policy")
 
@@ -253,4 +231,4 @@ if __name__ == "__main__":
     runs_per_job = args.pop("runs_per_job")
     n_jobs = args.pop("n_jobs")
 
-    PongA2cMultiSeed(args, runs_per_job=runs_per_job).run(n_jobs=n_jobs)
+    LunarA2Crunner(args, runs_per_job=runs_per_job).run(n_jobs=n_jobs)

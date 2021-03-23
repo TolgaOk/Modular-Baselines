@@ -95,7 +95,6 @@ class LogRolloutCallback(BaseCollectorCallback):
 
 
 class LogParamCallback(BaseAlgorithmCallback):
-    """ """
 
     def __init__(self,
                  file_name: str,

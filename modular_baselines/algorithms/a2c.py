@@ -14,6 +14,7 @@ from modular_baselines.collectors.collector import OnPolicyCollector
 from modular_baselines.collectors.callbacks import BaseCollectorCallback
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm
 from modular_baselines.algorithms.callbacks import BaseAlgorithmCallback
+from modular_baselines.buffers.buffer import GeneralBuffer
 
 
 class A2C(OnPolicyAlgorithm, SB3_A2C):
@@ -42,13 +43,16 @@ class A2C(OnPolicyAlgorithm, SB3_A2C):
 
     def __init__(self,
                  policy: torch.nn.Module,
-                 rollout_buffer: RolloutBuffer,
+                 rollout_buffer: GeneralBuffer,
                  collector: OnPolicyCollector,
                  env: VecEnv,
                  rollout_len: int,
                  ent_coef: float,
                  vf_coef: float,
+                 gamma: float,
+                 gae_lambda: float,
                  max_grad_norm: float,
+                 batch_size: int = None,
                  normalize_advantage: bool = False,
                  callbacks: List[BaseAlgorithmCallback] = [],
                  device: str = "cpu"):
@@ -65,7 +69,12 @@ class A2C(OnPolicyAlgorithm, SB3_A2C):
                                    rollout_len=rollout_len,
                                    callbacks=callbacks,
                                    device=device)
-        self.rollout_buffer = self.buffer
+        self.rollout_buffer = RolloutBufferWrapper(
+            self.buffer, rollout_len, batch_size)
+        self.rollout_len = rollout_len
+        self.gamma = gamma
+        self.batch_size = batch_size
+        self.gae_lambda = gae_lambda
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space
         self._n_updates = 0
@@ -75,41 +84,27 @@ class A2C(OnPolicyAlgorithm, SB3_A2C):
         self.max_grad_norm = max_grad_norm
         self.normalize_advantage = normalize_advantage
 
-        self.make_return_callback()
-
     def train(self) -> None:
         """ Train method of the SB3 """
-        return SB3_A2C.train(self)
-
-    def make_return_callback(self) -> None:
-        """ Include return calculating callback to rollout so that at the end
-        of each rollout return values are calculated to be used in the train
-        method.
-        """
-        self.collector.callbacks.append(ReturnCalculateCallback())
+        self.buffer.compute_returns_and_advantage(
+            rollout_size=self.rollout_len,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda)
+        SB3_A2C.train(self)
 
     def _update_learning_rate(self, *args):
         pass
 
 
-class ReturnCalculateCallback(BaseCollectorCallback):
-    """ Perform return calculation on a rollout memory at the end of every
-    rollout collection.
-    """
+class RolloutBufferWrapper():
 
-    def _on_rollout_start(self, *args) -> None:
-        pass
+    def __init__(self, buffer: GeneralBuffer, rollout_size: int, batch_size: int):
+        self.buffer = buffer
+        self.rollout_size = rollout_size
+        self.batch_size = batch_size
 
-    def _on_rollout_step(self, *args) -> None:
-        pass
+    def __getattr__(self, name: str):
+        return getattr(self.buffer, name)
 
-    def _on_rollout_end(self, locals_) -> None:
-        with torch.no_grad():
-            # Compute value for the last timestep
-            obs_tensor = torch.as_tensor(
-                locals_["new_obs"]).to(locals_["self"].device)
-            _, values, _ = locals_["self"].policy.forward(obs_tensor)
-
-        locals_["self"].buffer.compute_returns_and_advantage(
-            last_values=values,
-            dones=locals_["dones"])
+    def get(self, **kwargs):
+        return self.buffer.get_rollout(self.rollout_size, self.batch_size)

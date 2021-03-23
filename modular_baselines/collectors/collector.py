@@ -1,13 +1,10 @@
 import torch
 import numpy as np
 from gym.spaces import Discrete
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import List, Tuple
 from abc import ABC, abstractmethod
-from collections import deque
 
 from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.utils import safe_mean
-from stable_baselines3.common import logger
 from stable_baselines3.common.buffers import BaseBuffer
 
 from modular_baselines.collectors.callbacks import BaseCollectorCallback
@@ -50,7 +47,6 @@ class BaseOnPolicyCollector(BaseCollector):
         self.policy = policy
 
         self._last_obs = self.env.reset()
-        self._last_dones = np.zeros((self.env.num_envs,), dtype=np.bool)
 
         self.num_timesteps = 0
 
@@ -68,8 +64,6 @@ class BaseOnPolicyCollector(BaseCollector):
         """
 
         n_steps = 0
-        self.buffer.reset()
-
         for callback in self.callbacks:
             callback.on_rollout_start(locals())
 
@@ -85,14 +79,22 @@ class BaseOnPolicyCollector(BaseCollector):
                 # Reshape in case of discrete action
                 actions = actions.reshape(-1, 1)
 
+            # Termination new_obs is different than next_obs
+            next_obs = new_obs
+            terminated_indexes = np.argwhere(dones == 1).flatten()
+            if len(terminated_indexes) > 0:
+                next_obs = new_obs.copy()
+                for index in terminated_indexes:
+                    next_obs[index] = infos[index]["terminal_observation"]
+
             self.buffer.add(self._last_obs,
+                            next_obs,
                             actions,
                             rewards,
-                            self._last_dones,
+                            dones,
                             *values_to_save)
 
             self._last_obs = new_obs
-            self._last_dones = dones
 
             for callback in self.callbacks:
                 callback.on_rollout_step(locals())
@@ -112,7 +114,7 @@ class OnPolicyCollector(BaseOnPolicyCollector):
     """
 
     def process_step(self) -> Tuple[torch.Tensor]:
-        """ Sample actions, values and log probability of the actions using 
+        """ Sample actions, values and log probability of the actions using
         the policy
 
         Returns:
