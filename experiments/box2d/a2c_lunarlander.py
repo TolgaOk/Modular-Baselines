@@ -122,8 +122,11 @@ def run(args):
     rollout_callback = LogRolloutCallback()
     learn_callback = InitLogCallback(args.log_interval,
                                      args.log_dir)
-    weight_callback = LogWeightCallback("weights.json")
-    grad_callback = LogGradCallback("grads.json")
+    algorithm_callbacks = [learn_callback, hyper_callback]
+    if args.log_histogram:
+        weight_callback = LogWeightCallback("weights.json")
+        grad_callback = LogGradCallback("grads.json")
+        algorithm_callbacks += [weight_callback, grad_callback]
 
     # Environment
     vecenv = make_env(n_envs=args.n_envs,
@@ -163,10 +166,7 @@ def run(args):
                 batch_size=args.batch_size,
                 max_grad_norm=args.max_grad_norm,
                 normalize_advantage=False,
-                callbacks=[learn_callback,
-                           weight_callback,
-                           grad_callback,
-                           hyper_callback],
+                callbacks=algorithm_callbacks,
                 device=args.device)
 
     # Start learning
@@ -219,6 +219,8 @@ if __name__ == "__main__":
                         help=("Logging dir"))
     parser.add_argument("--ortho_init", action="store_true",
                         help="Use orthogonal initialization in the policy")
+    parser.add_argument("--log_histogram", action="store_true",
+                        help="Log the histogram of weights and gradients") 
 
     parser.add_argument("--n-jobs", type=int, default=1,
                         help="Number of parallelized jobs for experiments")
