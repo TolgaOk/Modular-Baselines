@@ -197,7 +197,7 @@ if __name__ == "__main__":
                         help="Batchsize of a parameter update")
     parser.add_argument("--gae-lambda", type=float, default=1.0,
                         help="GAE coefficient")
-    parser.add_argument("--lr", type=float, default=0.00083,
+    parser.add_argument("--lr", type=float, default=7e-4,
                         help="Learning rate")
     parser.add_argument("--gamma", type=float, default=0.995,
                         help="Discount factor")
@@ -209,7 +209,7 @@ if __name__ == "__main__":
                         help="RmsProp epsion coefficient")
     parser.add_argument("--max-grad-norm", type=float, default=0.5,
                         help="Maximum allowed graident norm")
-    parser.add_argument("--total-timesteps", type=int, default=int(4e5),
+    parser.add_argument("--total-timesteps", type=int, default=int(5e5),
                         help=("Training length interms of cumulative"
                               " environment timesteps"))
     parser.add_argument("--log-interval", type=int, default=500,

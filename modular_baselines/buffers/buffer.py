@@ -90,8 +90,6 @@ class GeneralBuffer(ReplayBuffer):
             done: np.ndarray,
             value: torch.Tensor,
             log_prob: torch.Tensor):
-        self.rewards[self.pos] = np.array(reward).copy()
-        self.dones[self.pos] = np.array(done).copy()
         self.values[self.pos] = value.clone().cpu().numpy().flatten()
         self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
         super().add(obs, next_obs, action, reward, done)

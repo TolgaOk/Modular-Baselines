@@ -104,7 +104,7 @@ class Policy(torch.nn.Module):
         return act_logit, values
 
     def _preprocess(self, tensor):
-        return tensor.float()
+        return tensor.float() / 255
 
     def forward(self, tensor):
         act_logit, values = self._forward(tensor)
