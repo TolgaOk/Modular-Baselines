@@ -28,14 +28,14 @@ class EnvWorker():
             # save final observation where user can get it, then reset
             info["terminal_observation"] = observation
             observation = self.env.reset()
-        return observation, reward, done, info
+        return self._to_torch_obs(observation), reward, done, info
 
     def seed(self, seed):
         return self.env.seed(seed)
 
     def reset(self):
         observation = self.env.reset()
-        return observation
+        return self._to_torch_obs(observation)
 
     def render(self, mode):
         return self.env.render(mode)
@@ -55,6 +55,10 @@ class EnvWorker():
 
     def set_attr(self, name, value):
         return setattr(self.env, name, value)
+
+    @staticmethod
+    def _to_torch_obs(obs):
+        return torch.from_numpy(obs) 
 
 
 def init_env_worker(rank, world_size):
@@ -230,14 +234,14 @@ def _flatten_obs(obs: Union[List[VecEnvObs], Tuple[VecEnvObs]], space: gym.space
         assert isinstance(space.spaces, OrderedDict), "Dict space must have ordered subspaces"
         assert isinstance(
             obs[0], dict), "non-dict observation for environment with Dict observation space"
-        return OrderedDict([(k, np.stack([o[k] for o in obs])) for k in space.spaces.keys()])
+        return OrderedDict([(k, torch.stack([o[k] for o in obs])).numpy() for k in space.spaces.keys()])
     elif isinstance(space, gym.spaces.Tuple):
         assert isinstance(
             obs[0], tuple), "non-tuple observation for environment with Tuple observation space"
         obs_len = len(space.spaces)
-        return tuple((np.stack([o[i] for o in obs]) for i in range(obs_len)))
+        return tuple((torch.stack([o[i] for o in obs]).numpy() for i in range(obs_len)))
     else:
-        return np.stack(obs)
+        return torch.stack(obs).numpy()
 
 
 if __name__ == "__main__":
