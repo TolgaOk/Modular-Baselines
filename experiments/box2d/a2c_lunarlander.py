@@ -217,9 +217,9 @@ if __name__ == "__main__":
                               " iterations"))
     parser.add_argument("--log-dir", type=str, default=None,
                         help=("Logging dir"))
-    parser.add_argument("--ortho_init", action="store_true",
+    parser.add_argument("--ortho-init", action="store_true",
                         help="Use orthogonal initialization in the policy")
-    parser.add_argument("--log_histogram", action="store_true",
+    parser.add_argument("--log-histogram", action="store_true",
                         help="Log the histogram of weights and gradients") 
 
     parser.add_argument("--n-jobs", type=int, default=1,

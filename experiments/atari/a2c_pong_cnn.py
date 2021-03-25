@@ -17,6 +17,7 @@ from modular_baselines.collectors.collector import OnPolicyCollector
 from modular_baselines.algorithms.a2c import A2C
 from modular_baselines.runners.multi_seed import MultiSeedRunner
 from modular_baselines.utils.score import log_score
+from modular_baselines.utils.rpc_subproc import RpcVecEnv
 from modular_baselines.loggers.basic import(InitLogCallback,
                                             LogRolloutCallback,
                                             LogWeightCallback,
@@ -32,7 +33,7 @@ def make_env(n_envs: int,
     env = make_atari_env(env_id=envname,
                          n_envs=n_envs,
                          seed=seed,
-                         vec_env_cls=SubprocVecEnv)
+                         vec_env_cls=RpcVecEnv)
     env = VecFrameStack(env, n_stack=n_stack)
     env = VecTransposeImage(env)
 
@@ -184,6 +185,7 @@ def run(args):
                 vf_coef=args.val_coef,
                 gae_lambda=args.gae_lambda,
                 gamma=args.gamma,
+                batch_size=args.batch_size,
                 max_grad_norm=args.max_grad_norm,
                 normalize_advantage=False,
                 callbacks=algorithm_callbacks,
@@ -214,7 +216,7 @@ if __name__ == "__main__":
                         help="Rollout Length")
     parser.add_argument("--n-stack", type=int, default=4,
                         help="Frame stack")
-    parser.add_argument("--batchsize", type=int, default=32,
+    parser.add_argument("--batch-size", type=int, default=32,
                         help="Batch size of the a2c training")
     parser.add_argument("--gae-lambda", type=float, default=1.0,
                         help="GAE coefficient")
@@ -240,9 +242,9 @@ if __name__ == "__main__":
                         help=("Logging dir"))
     parser.add_argument("--sb3-policy", action="store_true",
                         help="Use SB3 policy")
-    parser.add_argument("--ortho_init", action="store_true",
+    parser.add_argument("--ortho-init", action="store_true",
                         help="Use orthogonal initialization in the policy")
-    parser.add_argument("--log_histogram", action="store_true",
+    parser.add_argument("--log-histogram", action="store_true",
                         help="Log the histogram of weights and gradients")                  
 
     parser.add_argument("--n-jobs", type=int, default=1,
