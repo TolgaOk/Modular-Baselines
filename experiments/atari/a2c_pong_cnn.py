@@ -18,6 +18,7 @@ from modular_baselines.algorithms.a2c import A2C
 from modular_baselines.runners.multi_seed import MultiSeedRunner
 from modular_baselines.utils.score import log_score
 from modular_baselines.utils.rpc_subproc import RpcVecEnv
+from modular_baselines.utils.shared_subproc import SharedSubprocVecEnv
 from modular_baselines.loggers.basic import(InitLogCallback,
                                             LogRolloutCallback,
                                             LogWeightCallback,
@@ -33,7 +34,7 @@ def make_env(n_envs: int,
     env = make_atari_env(env_id=envname,
                          n_envs=n_envs,
                          seed=seed,
-                         vec_env_cls=RpcVecEnv)
+                         vec_env_cls=SharedSubprocVecEnv)
     env = VecFrameStack(env, n_stack=n_stack)
     env = VecTransposeImage(env)
 
