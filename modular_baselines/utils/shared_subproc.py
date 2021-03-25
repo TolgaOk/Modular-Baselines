@@ -130,7 +130,6 @@ class SharedSubprocVecEnv(VecEnv):
     def step_wait(self) -> VecEnvStepReturn:
         results = [remote.recv() for remote in self.remotes]
         self.waiting = False
-        print(results)
         rews, dones, infos = zip(*results)
         for index, done in enumerate(dones):
             if done:
