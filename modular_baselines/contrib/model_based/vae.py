@@ -5,11 +5,11 @@ class Vae(torch.nn.Module):
     def __init__(self, image_channels=4, z_dim=32):
         super().__init__()
         self.encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(image_channels, 32, kernel_size=4, stride=2),
+            torch.nn.Conv2d(image_channels, 128, kernel_size=4, stride=2),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            torch.nn.Conv2d(128, 128, kernel_size=4, stride=2),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 128, kernel_size=4, stride=2),
+            torch.nn.Conv2d(128, 128, kernel_size=4, stride=2),
             torch.nn.ReLU(),
             torch.nn.Conv2d(128, 256, kernel_size=4, stride=2),
             torch.nn.ReLU(),
@@ -23,13 +23,13 @@ class Vae(torch.nn.Module):
         self.decoder = torch.nn.Sequential(
             torch.nn.ConvTranspose2d(self.h_dim[0], 128, kernel_size=4, stride=2),
             torch.nn.ReLU(),
-            torch.nn.ConvTranspose2d(128, 64, kernel_size=5, stride=2),
+            torch.nn.ConvTranspose2d(128, 128, kernel_size=5, stride=2),
             torch.nn.ReLU(),
-            torch.nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2),
+            torch.nn.ConvTranspose2d(128, 128, kernel_size=5, stride=2),
             torch.nn.ReLU(),
-            torch.nn.ConvTranspose2d(32, 32, kernel_size=4, stride=2),
+            torch.nn.ConvTranspose2d(128, 128, kernel_size=4, stride=2),
             torch.nn.ReLU(),
-            torch.nn.Conv2d(32, image_channels, kernel_size=1, stride=1),
+            torch.nn.Conv2d(128, image_channels, kernel_size=1, stride=1),
             torch.nn.Sigmoid(),
         )
 

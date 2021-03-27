@@ -95,7 +95,7 @@ class LatentA2C(A2C):
             recon_loss, kl_loss = self.policy.vae.loss(observation, prediction, dist)
 
             self.policy.optimizer.zero_grad()
-            (recon_loss + self.kl_beta_coef * kl_loss).backward
+            (recon_loss + self.kl_beta_coef * kl_loss).backward()
             self.policy.optimizer.step()
 
             kl_losses.append(kl_loss.item())
