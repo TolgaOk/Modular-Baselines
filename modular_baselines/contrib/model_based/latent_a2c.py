@@ -82,13 +82,14 @@ class LatentA2C(A2C):
     def train(self) -> None:
         super().train()
 
-        floor_freq = int(self.model_update_freq)
-        update_freq = (np.random.random() < (self.model_update_freq - floor_freq)) + floor_freq
-        kl_losses = []
-        recon_losses = []
+        update_freq = self._calculate_update_freq()
+        losses = {
+            "vae_kl_loss": [],
+            "reconstruction_loss": []
+        }
         for _ in range(update_freq):
             sample = self.buffer.sample(self.model_batch_size)
-            
+
             observation = sample.observations.to(self.device)
             observation = self.policy._preprocess(observation)
             _, prediction, dist = self.policy.vae(observation)
@@ -98,9 +99,48 @@ class LatentA2C(A2C):
             (recon_loss + self.kl_beta_coef * kl_loss).backward()
             self.policy.optimizer.step()
 
-            kl_losses.append(kl_loss.item())
-            recon_losses.append(recon_loss.item())
+            losses["vae_kl_loss"].append(kl_loss.item())
+            losses["reconstruction_loss"].append(recon_loss.item())
 
-        if len(kl_losses) > 0:
-            logger.record("train/reconstruction_loss", np.mean(recon_losses))
-            logger.record("train/vae_kl_loss", np.mean(kl_losses))
+        self._log_losses(losses)
+
+    def _calculate_update_freq(self):
+        floor_freq = int(self.model_update_freq)
+        return (np.random.random() < (self.model_update_freq - floor_freq)) + floor_freq
+
+    def _log_losses(self, loss_container: Dict):
+        for name, losses in loss_container.items():
+            if len(losses) > 0:
+                logger.record("train/{}".format(name), np.mean(losses))
+
+
+class TransitionModelA2C(LatentA2C):
+
+    def train(self) -> None:
+        A2C.train(self)
+
+        update_freq = self._calculate_update_freq()
+        losses = {
+            "vae_kl_loss": [],
+            "reconstruction_loss": []
+        }
+        for _ in range(update_freq):
+            sample = self.buffer.sample(self.model_batch_size)
+
+            actions = sample.actions.to(self.device)
+            assert len(actions.shape) == 2
+
+            observation = self.policy._preprocess(sample.observations.to(self.device))
+            next_observation = self.policy._preprocess(sample.next_observations.to(self.device))
+
+            _, prediction, dist = self.policy.vae(observation, actions)
+            recon_loss, kl_loss = self.policy.vae.loss(next_observation, prediction, dist)
+
+            self.policy.optimizer.zero_grad()
+            (recon_loss + self.kl_beta_coef * kl_loss).backward()
+            self.policy.optimizer.step()
+
+            losses["vae_kl_loss"].append(kl_loss.item())
+            losses["reconstruction_loss"].append(recon_loss.item())
+
+        self._log_losses(losses)

@@ -62,28 +62,34 @@ class Policy(torch.nn.Module):
             raise ValueError("Unsupported action space {}".format(
                 observation_space))
 
-        self.vae = Vae(
-            image_channels=observation_space.shape[0],
-            z_dim=hidden_size)
-
-        self.action_layers = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, action_space.n))
-        self.value_layers = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1))
-
+        self._init_networks()
         if self.ortho_init:
-            module_gains = {
-                self.vae: np.sqrt(2),
-                self.action_layers: 0.01,
-                self.value_layers: 1,
-            }
-            for module, gain in module_gains.items():
-                module.apply(
-                    partial(ActorCriticCnnPolicy.init_weights, gain=gain))
+            self.initialize()
 
         self.optimizer = torch.optim.Adam(self.parameters(),
                                           lr=lr,
                                           eps=rms_prob_eps)
+
+    def _init_networks(self):
+        self.vae = Vae(
+            image_channels=self.observation_space.shape[0],
+            z_dim=self.hidden_size)
+        self.action_layers = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, self.action_space.n))
+        self.value_layers = torch.nn.Sequential(
+            torch.nn.Linear(self.hidden_size, 1))
+
+    def _module_gains(self):
+        return {
+            self.vae: np.sqrt(2),
+            self.action_layers: 0.01,
+            self.value_layers: 1,
+        }
+
+    def _initialize(self):
+        for module, gain in self._module_gains().items():
+            module.apply(
+                partial(ActorCriticCnnPolicy.init_weights, gain=gain))
 
     def _forward(self, tensor):
         processed_tensor = self._preprocess(tensor)
@@ -141,16 +147,6 @@ def run(args):
                     lr=args.lr,
                     rms_prob_eps=args.rms_prop_eps,
                     ortho_init=args.ortho_init)
-
-    # Stable baseline_policy
-    if args.sb3_policy:
-        print("Using SB3 policy with {} initialization!".format(
-            "ortho" if args.ortho_init else "default"))
-        policy = ActorCriticCnnPolicy(
-            vecenv.observation_space,
-            vecenv.action_space,
-            lambda x: args.lr,
-            ortho_init=args.ortho_init)
 
     # Modules
     buffer = GeneralBuffer(buffer_size=max(args.n_steps + 1, args.buffer_size // args.n_envs),
