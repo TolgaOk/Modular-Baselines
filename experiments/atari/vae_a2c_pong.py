@@ -64,7 +64,7 @@ class Policy(torch.nn.Module):
 
         self._init_networks()
         if self.ortho_init:
-            self.initialize()
+            self._initialize()
 
         self.optimizer = torch.optim.Adam(self.parameters(),
                                           lr=lr,
