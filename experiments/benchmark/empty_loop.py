@@ -37,7 +37,6 @@ class EnvBenchmark():
         for process in self.processes:
             process.join()
         return self.maxsize / (time.time() - start_time)
-        print("FPS: {}".format())
 
     @staticmethod
     def increment(counter, lock):
