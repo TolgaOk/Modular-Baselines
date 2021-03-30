@@ -113,3 +113,42 @@ class TransitionVae(Vae):
         latent = dist.rsample()
         prediction = self.decode(latent, actions)
         return latent, prediction, dist
+
+
+class LatentActionPredictionVae(Vae):
+
+    def __init__(self, action_size, image_channels, z_dim=32):
+        self.action_size = action_size
+        super().__init__(image_channels, z_dim)
+
+    def build(self):
+        self.encoder = self.encoder_net(self.in_channel, 256, self.hidden_channel)
+        self.fc_mean = torch.nn.Linear(np.product(self.hidden_dims), self.z_dim)
+        self.fc_std = torch.nn.Linear(np.product(self.hidden_dims), self.z_dim)
+
+        self.action_pred = torch.nn.Sequential(
+            torch.nn.Linear(self.z_dim * 2, 256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(256, self.action_size))
+
+    def decode(self):
+        raise NotImplementedError
+
+    def forward(self, obs_tensor, next_obs_tensor):
+        obs = torch.cat((next_obs_tensor, obs_tensor), dim=0)
+        dists = self.encode(obs)
+        next_obs_latent, obs_latent = dists.rsample().split(obs.shape[0] // 2, dim=0)
+        prediction = self.action_pred(torch.cat((next_obs_latent, obs_latent), dim=-1))
+        return prediction, dists
+
+    @staticmethod
+    def loss(actions, prediction, dist):
+        if len(actions.shape) != 1:
+            actions = actions.squeeze(1)
+        prior_mean = torch.zeros_like(dist.loc)
+        prior_std = torch.ones_like(dist.scale)
+        prior_dist = torch.distributions.Normal(prior_mean, prior_std)
+
+        kl_divergence = torch.distributions.kl_divergence(dist, prior_dist).mean()
+        recon_loss = torch.nn.functional.cross_entropy(prediction, actions)
+        return recon_loss, kl_divergence
