@@ -176,3 +176,36 @@ class LatentActionPredA2C(LatentA2C):
             losses["reconstruction_loss"].append(recon_loss.item())
 
         self._log_losses(losses)
+
+
+class LatentTransitionPredA2C(LatentA2C):
+
+    def train(self) -> None:
+        A2C.train(self)
+
+        update_freq = self._calculate_update_freq()
+        losses = {
+            "vae_kl_loss": [],
+            "reconstruction_loss": []
+        }
+        for _ in range(update_freq):
+            sample = self.buffer.sample(self.model_batch_size)
+
+            actions = sample.actions.to(self.device)
+            assert len(actions.shape) == 2
+
+            observation = self.policy._preprocess(sample.observations.to(self.device))
+            next_observation = self.policy._preprocess(sample.next_observations.to(self.device))
+
+            next_observation_latent, prediction, dists = self.policy.vae(
+                observation, next_observation, actions)
+            recon_loss, kl_loss = self.policy.vae.loss(next_observation_latent, prediction, dists)
+
+            self.policy.optimizer.zero_grad()
+            (recon_loss + self.kl_beta_coef * kl_loss).backward()
+            self.policy.optimizer.step()
+
+            losses["vae_kl_loss"].append(kl_loss.item())
+            losses["reconstruction_loss"].append(recon_loss.item())
+
+        self._log_losses(losses)

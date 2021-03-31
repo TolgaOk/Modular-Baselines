@@ -152,3 +152,49 @@ class LatentActionPredictionVae(Vae):
         kl_divergence = torch.distributions.kl_divergence(dist, prior_dist).mean()
         recon_loss = torch.nn.functional.cross_entropy(prediction, actions)
         return recon_loss, kl_divergence
+
+
+class LatentTransitionPredictionVae(Vae):
+
+    def __init__(self, action_size, image_channels, z_dim=32):
+        self.action_size = action_size
+        super().__init__(image_channels, z_dim)
+
+    def build(self):
+        self.encoder = self.encoder_net(self.in_channel, 256, self.hidden_channel)
+        self.fc_mean = torch.nn.Linear(np.product(self.hidden_dims), self.z_dim)
+        self.fc_std = torch.nn.Linear(np.product(self.hidden_dims), self.z_dim)
+
+        self.latent_transition_pred = torch.nn.Sequential(
+            torch.nn.Linear(self.z_dim, 256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(256, self.z_dim * self.action_size))
+
+    def decode(self):
+        raise NotImplementedError
+
+    def forward(self, obs_tensor, next_obs_tensor, actions):
+        obs = torch.cat((next_obs_tensor, obs_tensor), dim=0)
+        dists = self.encode(obs)
+        next_obs_latent, obs_latent = dists.rsample().split(obs.shape[0] // 2, dim=0)
+
+        if len(actions.shape) == 1:
+            actions = actions.unsqueeze(-1)
+        action_indexes = actions.unsqueeze(-1).repeat_interleave(obs_latent.shape[-1], dim=-1)
+
+        action_next_obs_latent = self.latent_transition_pred(
+            obs_latent).reshape(obs_latent.shape[0], self.action_size, -1)
+        pred_next_obs_latent = action_next_obs_latent.gather(dim=1, index=action_indexes).squeeze(1)
+
+        return next_obs_latent, pred_next_obs_latent, dists
+
+    @staticmethod
+    def loss(next_obs_latent, prediction, dist):
+        prior_mean = torch.zeros_like(dist.loc)
+        prior_std = torch.ones_like(dist.scale)
+        prior_dist = torch.distributions.Normal(prior_mean, prior_std)
+
+        kl_divergence = torch.distributions.kl_divergence(dist, prior_dist).mean()
+        # We detach next observation latent vector so that the trivial gradients can bee avoided
+        recon_loss = torch.nn.functional.mse_loss(prediction, next_obs_latent.detach())
+        return recon_loss, kl_divergence
