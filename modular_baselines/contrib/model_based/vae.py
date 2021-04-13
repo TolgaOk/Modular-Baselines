@@ -168,33 +168,45 @@ class LatentTransitionPredictionVae(Vae):
         self.latent_transition_pred = torch.nn.Sequential(
             torch.nn.Linear(self.z_dim, 256),
             torch.nn.ReLU(),
-            torch.nn.Linear(256, self.z_dim * self.action_size))
+            torch.nn.Linear(256, self.z_dim * self.action_size * 2))
 
     def decode(self):
         raise NotImplementedError
 
     def forward(self, obs_tensor, next_obs_tensor, actions):
-        obs = torch.cat((next_obs_tensor, obs_tensor), dim=0)
-        dists = self.encode(obs)
-        next_obs_latent, obs_latent = dists.rsample().split(obs.shape[0] // 2, dim=0)
+        combined_obs = torch.cat((next_obs_tensor, obs_tensor), dim=0)
+        dists = self.encode(combined_obs)
+        next_obs_dist, obs_dist = [torch.distributions.normal.Normal(loc, std)
+                                   for loc, std in zip(
+            dists.loc.split(combined_obs.shape[0] // 2, dim=0),
+            dists.scale.split(combined_obs.shape[0] // 2, dim=0))
+        ]
+        obs_latent = obs_dist.rsample()
 
         if len(actions.shape) == 1:
             actions = actions.unsqueeze(-1)
-        action_indexes = actions.unsqueeze(-1).repeat_interleave(obs_latent.shape[-1], dim=-1)
+        action_indexes = actions.unsqueeze(-1).repeat_interleave(obs_latent.shape[-1] * 2, dim=-1)
 
         action_next_obs_latent = self.latent_transition_pred(
             obs_latent).reshape(obs_latent.shape[0], self.action_size, -1)
-        pred_next_obs_latent = action_next_obs_latent.gather(dim=1, index=action_indexes).squeeze(1)
+        pred_next_latent_obs_params = action_next_obs_latent.gather(
+            dim=1, index=action_indexes).squeeze(1)
 
-        return next_obs_latent, pred_next_obs_latent, dists
+        pred_mean, pred_std_logit = pred_next_latent_obs_params.split(
+            obs_latent.shape[-1], dim=-1)
+        pred_std = torch.nn.functional.softplus(pred_std_logit)
+        pred_next_obs_dist = torch.distributions.Normal(pred_mean, pred_std)
+
+        return next_obs_dist, pred_next_obs_dist, dists
 
     @staticmethod
-    def loss(next_obs_latent, prediction, dist):
+    def loss(next_obs_dist, pred_next_obs_dist, dist):
         prior_mean = torch.zeros_like(dist.loc)
         prior_std = torch.ones_like(dist.scale)
         prior_dist = torch.distributions.Normal(prior_mean, prior_std)
 
         kl_divergence = torch.distributions.kl_divergence(dist, prior_dist).mean()
         # We detach next observation latent vector so that the trivial gradients can bee avoided
-        recon_loss = torch.nn.functional.mse_loss(prediction, next_obs_latent.detach())
+
+        recon_loss = torch.distributions.kl_divergence(pred_next_obs_dist, next_obs_dist).mean()
         return recon_loss, kl_divergence

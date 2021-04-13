@@ -197,9 +197,9 @@ class LatentTransitionPredA2C(LatentA2C):
             observation = self.policy._preprocess(sample.observations.to(self.device))
             next_observation = self.policy._preprocess(sample.next_observations.to(self.device))
 
-            next_observation_latent, prediction, dists = self.policy.vae(
+            next_obs_dist, prediction_dist, dists = self.policy.vae(
                 observation, next_observation, actions)
-            recon_loss, kl_loss = self.policy.vae.loss(next_observation_latent, prediction, dists)
+            recon_loss, kl_loss = self.policy.vae.loss(next_obs_dist, prediction_dist, dists)
 
             self.policy.optimizer.zero_grad()
             (recon_loss + self.kl_beta_coef * kl_loss).backward()
