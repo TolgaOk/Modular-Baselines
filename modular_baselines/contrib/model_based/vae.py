@@ -208,5 +208,10 @@ class LatentTransitionPredictionVae(Vae):
         kl_divergence = torch.distributions.kl_divergence(dist, prior_dist).mean()
         # We detach next observation latent vector so that the trivial gradients can bee avoided
 
-        recon_loss = torch.distributions.kl_divergence(pred_next_obs_dist, next_obs_dist.detach()).mean()
+        detached_next_obs_dist = torch.distributions.Normal(
+            pred_next_obs_dist.loc.detach(),
+            pred_next_obs_dist.scale.detach())
+        recon_loss = torch.distributions.kl_divergence(
+            pred_next_obs_dist,
+            detached_next_obs_dist).mean()
         return recon_loss, kl_divergence
