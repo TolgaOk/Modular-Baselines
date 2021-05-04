@@ -116,7 +116,8 @@ class GeneralBuffer(ReplayBuffer):
 
     def get_rollout(self,
                     rollout_size: int,
-                    batch_size: Optional[int] = None
+                    batch_size: Optional[int] = None,
+                    permute_indices: bool = True
                     ) -> Generator[RolloutBufferSamples, None, None]:
         """Sample the latest experiences to form a Rollout.
 
@@ -130,15 +131,14 @@ class GeneralBuffer(ReplayBuffer):
         assert (self.buffer_size > rollout_size), "Buffer size must be larger than the rollout_size"
         pos_indices = np.arange(-rollout_size, 0) + self.pos - 1
         rollout = {}
-        for tensor_name in ["observations", "actions", "values", "log_probs",
-                            "advantages", "returns"]:
-            rollout[tensor_name] = getattr(self, tensor_name)[pos_indices]
 
         if batch_size is None:
             batch_size = rollout_size * self.n_envs
 
         start_idx = 0
-        batch_indices = np.random.permutation(rollout_size * self.n_envs)
+        batch_indices = np.arange(rollout_size * self.n_envs)
+        if permute_indices:
+            batch_indices = np.random.permutation(batch_indices)
         while start_idx < rollout_size * self.n_envs:
             indices = batch_indices[start_idx: start_idx + batch_size]
             yield self._get_rollout_samples(

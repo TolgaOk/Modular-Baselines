@@ -33,7 +33,7 @@ class InitLogCallback(BaseAlgorithmCallback):
         self.start_time = time.time()
 
     def _on_step(self, locals_) -> bool:
-        if locals_["iteration"] % self.log_interval == 0:
+        if locals_["iteration"] % self.log_interval == self.log_interval - 1:
             fps = int(locals_["num_timesteps"] /
                       (time.time() - self.start_time))
             logger.record("time/iterations",

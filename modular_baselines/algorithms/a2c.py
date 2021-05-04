@@ -57,9 +57,9 @@ class A2C(OnPolicyAlgorithm, SB3_A2C):
                  callbacks: List[BaseAlgorithmCallback] = [],
                  device: str = "cpu"):
 
-        for name in ("optimizer", "evaluate_actions"):
-            if not hasattr(policy, name):
-                raise ValueError("Policy has no attribute {}".format(name))
+        # for name in ("optimizer", "evaluate_actions"):
+        #     if not hasattr(policy, name):
+        #         raise ValueError("Policy has no attribute {}".format(name))
 
         OnPolicyAlgorithm.__init__(self,
                                    policy=policy,

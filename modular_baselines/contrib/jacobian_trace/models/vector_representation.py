@@ -1,7 +1,10 @@
+from itertools import chain
 import numpy as np
 import torch
 import torch.distributions as td
 import torch.nn as nn
+
+from modular_baselines.contrib.jacobian_trace.type_aliases import LatentTuple
 
 
 class DenseModel(nn.Module):
@@ -34,7 +37,7 @@ class DenseModel(nn.Module):
         return self.model(features)
 
 
-class DistributionModel(DenseModel):
+class NormalDistributionModel(DenseModel):
 
     def __init__(self,
                  feature_size: int,
@@ -54,23 +57,36 @@ class DistributionModel(DenseModel):
         dist = torch.distributions.Normal(mean, std)
         return dist
 
-    def reparam(self, dist, sample):
-        return dist.loc + dist.scale * ((sample - dist.loc)/dist.scale).detach()
+    @staticmethod
+    def reparam(dist, sample):
+        return dist.loc + dist.scale * ((sample - dist.loc)/(dist.scale + 1e-7)).detach()
 
+    @staticmethod
+    def detach_dist(dist):
+        return torch.distributions.Normal(
+            dist.loc.detach(),
+            dist.scale.detach()
+        )
 
 class ObservationEncoder(DenseModel):
     pass
 
 
-class ObservationDecoder(DistributionModel):
+class ObservationDecoder(NormalDistributionModel):
+    def forward(self, latent_tuple: LatentTuple):
+        features = self.make_feature(latent_tuple)
+        return super().forward(features)
+
+    @staticmethod
+    def make_feature(latent_tuple: LatentTuple):
+        return torch.cat([latent_tuple.rsample, latent_tuple.embedding], dim=-1)
+
+
+class StateDistribution(NormalDistributionModel):
     pass
 
 
-class StateDistribution(DistributionModel):
-    pass
-
-
-class TransitionDistribution(DenseModel):
+class DiscreteActionTransitionDistribution(NormalDistributionModel):
 
     def __init__(self,
                  feature_size: int,
@@ -81,31 +97,62 @@ class TransitionDistribution(DenseModel):
                  activation=nn.ReLU):
         self._action_size = action_size
         super().__init__(feature_size,
-                         output_size * 2 * action_size,
+                         output_size * action_size,
                          layers,
                          hidden_size,
                          activation)
 
-    def forward(self, features, actions):
-        features = super().forward(features).reshape(features.shape[0], self._action_size, -1)
+    def forward(self, latent_tuple: LatentTuple, actions: torch.Tensor):
+        actions = DiscreteActor.maybe_onehot(actions, self._action_size)
 
-        if len(actions.shape) == 1:
-            actions = actions.unsqueeze(-1)
-        action_indexes = actions.unsqueeze(-1).repeat_interleave(features.shape[-1], dim=-1)
-        selected_features = features.gather(dim=1, index=action_indexes).squeeze(1)
+        features = self.make_feature(latent_tuple)
+        logits = DenseModel.forward(self, features).reshape(features.shape[0], self._action_size, -1)
+        selected_logits = torch.einsum("baf,ba->bf", logits, actions)
 
-        mean, std = torch.chunk(selected_features, 2, dim=-1)
+        mean, std = torch.chunk(selected_logits, 2, dim=-1)
         std = torch.nn.functional.softplus(std) + 0.1
         dist = torch.distributions.Normal(mean, std)
         return dist
 
+    @staticmethod
+    def make_feature(latent_tuple: LatentTuple):
+        return torch.cat([latent_tuple.rsample, latent_tuple.embedding], dim=-1)
 
-class Actor(DenseModel):
-    pass
 
+class DiscreteActor(DenseModel):
+
+    def forward(self, latent_tuple: LatentTuple, onehot: bool = False):
+        features = self.make_feature(latent_tuple)
+        act_logits = super().forward(features)
+        if onehot:
+            return torch.distributions.one_hot_categorical.OneHotCategorical(logits=act_logits)
+        return torch.distributions.categorical.Categorical(logits=act_logits)
+
+    @staticmethod
+    def make_feature(latent_tuple: LatentTuple):
+        return torch.cat([latent_tuple.rsample, latent_tuple.embedding], dim=-1)
+
+    @staticmethod
+    def reparam(act_dist, actions: torch.Tensor):
+        actions = DiscreteActor.maybe_onehot(actions, act_dist.probs.shape[-1])
+        return actions + act_dist.probs - act_dist.probs.detach()
+
+    @staticmethod
+    def maybe_onehot(tensor: torch.Tensor, maxsize: int):
+        if len(tensor.shape) == 2 and tensor.shape[1] != 1:
+            return tensor
+        return (torch.arange(maxsize, device=tensor.device).reshape(1, -1)
+                == tensor.reshape(-1, 1)).float()
 
 class Critic(DenseModel):
-    pass
+
+    def forward(self, latent_tuple: LatentTuple):
+        features = self.make_feature(latent_tuple)
+        return super().forward(features)
+
+    @staticmethod
+    def make_feature(latent_tuple: LatentTuple):
+        return torch.cat([latent_tuple.rsample, latent_tuple.embedding], dim=-1)
 
 
 class JTACModel(torch.nn.Module):
@@ -113,7 +160,8 @@ class JTACModel(torch.nn.Module):
     def __init__(self,
                  input_size,
                  action_size,
-                 lr=4e-4,
+                 model_lr=4e-4,
+                 ac_lr: float = 7e-4,
                  state_size=32,
                  latent_size=200,
                  encoder_layers=2,
@@ -129,52 +177,75 @@ class JTACModel(torch.nn.Module):
                  critic_layers=1,
                  critic_hidden_size=200):
         super().__init__()
-        self.encoder = ObservationEncoder(input_size,
-                                          latent_size,
-                                          encoder_layers,
-                                          encoder_hidden_size)
-        self.decoder = ObservationDecoder(latent_size + state_size,
-                                          input_size,
-                                          decoder_layers,
-                                          decoder_hidden_size)
-        self.state_dist = StateDistribution(latent_size,
-                                            state_size,
-                                            state_layers,
-                                            state_hidden_size)
-        self.transition_dist = TransitionDistribution(latent_size + state_size,
-                                                 state_size,
-                                                 action_size,
-                                                 trans_layers,
-                                                 trans_hidden_size)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        self.encoder = ObservationEncoder(
+            input_size,
+            latent_size,
+            encoder_layers,
+            encoder_hidden_size)
+        self.decoder = ObservationDecoder(
+            latent_size + state_size,
+            input_size,
+            decoder_layers,
+            decoder_hidden_size)
+        self.state_dist = StateDistribution(
+            latent_size,
+            state_size,
+            state_layers,
+            state_hidden_size)
+        self.transition_dist = DiscreteActionTransitionDistribution(
+            latent_size + state_size,
+            state_size,
+            action_size,
+            trans_layers,
+            trans_hidden_size)
 
-        self.actor = Actor(state_size + latent_size,
-                           action_size,
-                           actor_layers,
-                           actor_hidden_size)
-        self.critic = Critic(state_size + latent_size,
-                             1,
-                             critic_layers,
-                             critic_hidden_size)
+        self.actor = DiscreteActor(
+            state_size + latent_size,
+            action_size,
+            actor_layers,
+            actor_hidden_size)
+        self.critic = Critic(
+            state_size + latent_size,
+            1,
+            critic_layers,
+            critic_hidden_size)
 
-    def encode(self, observation):
-        return self.encoder(observation)
+        self.model_optimizer = torch.optim.Adam(
+            chain(self.encoder.parameters(), self.decoder.parameters(),
+                  self.state_dist.parameters(), self.transition_dist.parameters()),
+            lr=model_lr)
+        self.ac_optimizer = torch.optim.Adam(
+            chain(self.actor.parameters(), self.critic.parameters()),
+            lr=ac_lr)
 
-    def make_state_dist(self, logits):
-        return self.state_dist(logits)
-
-    def make_transition_dist(self, logits, rstate, actions):
-        return self.transition_dist(torch.cat([logits, rstate], dim=-1), actions)
-
-    def make_feature(self, logits, rstate):
-        return torch.cat([logits, rstate], dim=-1)
+    def get_latent(self, observation):
+        observation = self._preprocess(observation)
+        embedding = self.encoder(observation)
+        state_dist = self.state_dist(embedding)
+        rstate = state_dist.rsample()
+        return LatentTuple(embedding, state_dist, rstate)
 
     def forward(self, observation):
-        logits = self.encoder(observation)
-        state_dist = self.state_dist(logits)
+        latent_tuple = self.get_latent(observation)
 
-        rstate = state_dist.rsample()
-        return logits, state_dist, rstate
+        values = self.critic(latent_tuple)
+        actor_dist = self.actor(latent_tuple, onehot=False)
+
+        action = actor_dist.sample()
+        log_prob = actor_dist.log_prob(action)
+        return action, values, log_prob
+
+    def evaluate_actions(self, observation, action):
+        latent_tuple = self.get_latent(observation)
+
+        values = self.critic(latent_tuple)
+        actor_dist = self.actor(latent_tuple, onehot=False)
+        log_prob = actor_dist.log_prob(action)
+        entropy = actor_dist.entropy()
+        return values, log_prob, entropy
+
+    def _preprocess(self, tensor):
+        return tensor
 
     @staticmethod
     def batch_chunk_distribution(distribution):
