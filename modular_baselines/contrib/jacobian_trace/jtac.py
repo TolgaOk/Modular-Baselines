@@ -89,7 +89,7 @@ class JTAC(A2C):
         self.policy.ac_optimizer.zero_grad()
         self.policy.model_optimizer.zero_grad()
 
-        model_loss = self.model_loss()
+        model_loss = self.discrete_model_loss()
         actor_critic_loss = self.jtac_loss() if self.enable_jtac else self.a2c_loss()
         loss = model_loss * self.model_loss_coef + actor_critic_loss
         loss.backward()
@@ -136,6 +136,20 @@ class JTAC(A2C):
 
         logger.record_mean("train/loss/model/transition_kl", transition_kl_loss.item())
         logger.record_mean("train/loss/model/prior_kl", prior_kl_loss.item())
+        logger.record_mean("train/loss/model/reconstruction", recon_loss.item())
+
+        return model_loss
+
+    def discrete_model_loss(self):
+        sample = self.buffer.sample(self.model_batch_size)
+        recon_loss, transition_loss, e_latent_loss, q_latent_loss, perplexity = self.policy.loss(
+            sample.observations, sample.next_observations, sample.actions)
+        model_loss = recon_loss + transition_loss + e_latent_loss + q_latent_loss
+
+        logger.record_mean("train/loss/model/transition_kl", transition_loss.item())
+        logger.record_mean("train/loss/model/e_latent_loss", e_latent_loss.item())
+        logger.record_mean("train/loss/model/q_latent_loss", q_latent_loss.item())
+        logger.record_mean("train/loss/model/perplexity", perplexity.item())
         logger.record_mean("train/loss/model/reconstruction", recon_loss.item())
 
         return model_loss

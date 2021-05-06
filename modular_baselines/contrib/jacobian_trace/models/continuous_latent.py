@@ -90,7 +90,7 @@ class DiscreteActionTransitionDistribution(NormalDistributionModel):
 
     def __init__(self,
                  feature_size: int,
-                 output_size: tuple,
+                 output_size: int,
                  action_size: int,
                  layers: int,
                  hidden_size: int,

@@ -3,10 +3,17 @@ import torch
 from typing import Any, Callable, Dict, List, NamedTuple, Tuple, Union
 
 class LatentTuple(NamedTuple):
-
     embedding: torch.Tensor
     dist: torch.distributions.Distribution
     rsample: torch.Tensor
+
+class DiscreteLatentTuple(NamedTuple):
+    logit: torch.Tensor
+    # q_latent_loss: torch.Tensor
+    # e_latent_loss: torch.Tensor
+    quantized: torch.Tensor
+    # perplexity: torch.Tensor
+    encoding: torch.Tensor
 
 class TransitionTuple(NamedTuple):
     latent_tuple: LatentTuple
