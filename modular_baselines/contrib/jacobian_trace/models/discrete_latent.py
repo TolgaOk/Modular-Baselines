@@ -151,11 +151,11 @@ class DiscreteJTACModel(torch.nn.Module):
                  transition_model,
                  actor_model,
                  critic_model,
-                 model_lr=4e-4,
+                 model_lr: float = 4e-4,
                  actor_lr: float = 4e-4,
                  critic_lr: float = 4e-4,
-                 n_embeddings=128,
-                 embedding_size=32):
+                 n_embeddings: int = 128,
+                 embedding_size: int = 32):
         super().__init__()
         self.encoder = ObservationEncoder(
             model=encoder_model,

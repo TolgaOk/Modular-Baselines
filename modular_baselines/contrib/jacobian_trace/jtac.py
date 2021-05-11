@@ -47,7 +47,6 @@ class JTAC(A2C):
         ValueError: Policy class must have an "optimizer"
             members
     """
-
     def __init__(self,
                  policy: torch.nn.Module,
                  rollout_buffer: JTACBuffer,
@@ -59,8 +58,7 @@ class JTAC(A2C):
                  gamma: float,
                  gae_lambda: float,
                  model_loss_coef: float,
-                 prior_kl_coef: float,
-                 trans_kl_coef: float,
+                 trans_loss_coef: float,
                  model_iteration_per_update: int,
                  model_batch_size: int,
                  model_horizon: int,
@@ -74,8 +72,7 @@ class JTAC(A2C):
                  device: str = "cpu"):
 
         self.model_loss_coef = model_loss_coef
-        self.prior_kl_coef = prior_kl_coef
-        self.trans_kl_coef = trans_kl_coef
+        self.trans_loss_coef = trans_loss_coef
         self.model_iteration_per_update = model_iteration_per_update
         self.model_batch_size = model_batch_size
         self.model_horizon = model_horizon
@@ -99,28 +96,6 @@ class JTAC(A2C):
                      device=device)
 
     def train(self) -> None:
-
-        for iteration in range(self.model_iteration_per_update):
-            self.policy.model_optimizer.zero_grad()
-            sample = self.buffer.get_sequential_rollout(self.model_horizon, self.model_batch_size)
-            model_loss = self.discrete_model_loss(sample)
-            transition_loss, recon_loss, q_latent_loss, e_latent_loss, perplexity = model_loss
-            (transition_loss * self.trans_kl_coef
-             + recon_loss
-             + q_latent_loss
-             + e_latent_loss).backward()
-
-            torch.nn.utils.clip_grad_norm_(
-                chain(
-                    self.policy.encoder.parameters(),
-                    self.policy.decoder.parameters(),
-                    self.policy.transition_dist.parameters(),
-                ),
-                self.max_grad_norm
-            )
-
-            self.policy.model_optimizer.step()
-
         for iteration in range(self.policy_iteration_per_update):
             self.policy.actor_optimizer.zero_grad()
             self.policy.critic_optimizer.zero_grad()
@@ -139,6 +114,27 @@ class JTAC(A2C):
 
             self.policy.actor_optimizer.step()
             self.policy.critic_optimizer.step()
+
+        for iteration in range(self.model_iteration_per_update):
+            self.policy.model_optimizer.zero_grad()
+            sample = self.buffer.get_sequential_rollout(self.model_horizon, self.model_batch_size)
+            model_loss = self.discrete_model_loss(sample)
+            transition_loss, recon_loss, q_latent_loss, e_latent_loss, perplexity = model_loss
+            (transition_loss * self.trans_loss_coef
+             + recon_loss
+             + q_latent_loss
+             + e_latent_loss).backward()
+
+            torch.nn.utils.clip_grad_norm_(
+                chain(
+                    self.policy.encoder.parameters(),
+                    self.policy.decoder.parameters(),
+                    self.policy.transition_dist.parameters(),
+                ),
+                self.max_grad_norm
+            )
+
+            self.policy.model_optimizer.step()
 
         logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self._n_updates += 1
@@ -253,7 +249,7 @@ class JTAC(A2C):
             policy_loss = sum(local_log.policy) / meta_data.horizon
             entropy_loss = sum(local_log.entropy) / meta_data.horizon
 
-            logger.record_mean("train/next_state_logp", next_state_logp.item())
+            # logger.record_mean("train/next_state_logp", next_state_logp.item())
         else:
             latent_tuple = DiscreteLatentTuple(
                 *(tensor.reshape(np.product(tensor.shape[:2]), *tensor.shape[2:]) for tensor in latent_tuple))
