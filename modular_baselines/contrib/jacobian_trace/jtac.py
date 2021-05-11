@@ -5,7 +5,7 @@ import time
 import gym
 from collections import namedtuple
 from itertools import chain
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union, NamedTuple
 
 from stable_baselines3.common import logger
 from stable_baselines3.common.utils import safe_mean, configure_logger
@@ -21,8 +21,9 @@ from stable_baselines3.a2c.a2c import A2C as SB3_A2C
 
 from modular_baselines.contrib.jacobian_trace.buffer import JTACBuffer
 from modular_baselines.contrib.jacobian_trace.utils import FreezeParameters
-from modular_baselines.contrib.jacobian_trace.type_aliases import (LatentTuple,
-                                                                   TransitionTuple)
+from modular_baselines.contrib.jacobian_trace.type_aliases import (DiscreteLatentTuple,
+                                                                   TransitionTuple,
+                                                                   SequentialRolloutSamples)
 
 
 class JTAC(A2C):
@@ -60,8 +61,14 @@ class JTAC(A2C):
                  model_loss_coef: float,
                  prior_kl_coef: float,
                  trans_kl_coef: float,
+                 model_iteration_per_update: int,
                  model_batch_size: int,
+                 model_horizon: int,
+                 policy_iteration_per_update: int,
+                 policy_batch_size: int,
+                 policy_nstep: int,
                  max_grad_norm: float,
+                 reward_clip: Optional[float] = None,
                  enable_jtac: bool = False,
                  callbacks: List[BaseAlgorithmCallback] = [],
                  device: str = "cpu"):
@@ -69,7 +76,13 @@ class JTAC(A2C):
         self.model_loss_coef = model_loss_coef
         self.prior_kl_coef = prior_kl_coef
         self.trans_kl_coef = trans_kl_coef
+        self.model_iteration_per_update = model_iteration_per_update
         self.model_batch_size = model_batch_size
+        self.model_horizon = model_horizon
+        self.policy_iteration_per_update = policy_iteration_per_update
+        self.policy_batch_size = policy_batch_size
+        self.policy_nstep = policy_nstep
+        self.reward_clip = reward_clip
         self.enable_jtac = enable_jtac
         A2C.__init__(self,
                      policy=policy,
@@ -86,177 +99,241 @@ class JTAC(A2C):
                      device=device)
 
     def train(self) -> None:
-        self.policy.ac_optimizer.zero_grad()
-        self.policy.model_optimizer.zero_grad()
 
-        model_loss = self.discrete_model_loss()
-        actor_critic_loss = self.jtac_loss() if self.enable_jtac else self.a2c_loss()
-        loss = model_loss * self.model_loss_coef + actor_critic_loss
-        loss.backward()
+        for iteration in range(self.model_iteration_per_update):
+            self.policy.model_optimizer.zero_grad()
+            sample = self.buffer.get_sequential_rollout(self.model_horizon, self.model_batch_size)
+            model_loss = self.discrete_model_loss(sample)
+            transition_loss, recon_loss, q_latent_loss, e_latent_loss, perplexity = model_loss
+            (transition_loss * self.trans_kl_coef
+             + recon_loss
+             + q_latent_loss
+             + e_latent_loss).backward()
 
-        # Clip grad norm
-        torch.nn.utils.clip_grad_norm_(
-            chain(self.policy.critic.parameters(),
-                  self.policy.actor.parameters()),
-            self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                chain(
+                    self.policy.encoder.parameters(),
+                    self.policy.decoder.parameters(),
+                    self.policy.transition_dist.parameters(),
+                ),
+                self.max_grad_norm
+            )
 
-        self.policy.model_optimizer.step()
-        self.policy.ac_optimizer.step()
+            self.policy.model_optimizer.step()
+
+        for iteration in range(self.policy_iteration_per_update):
+            self.policy.actor_optimizer.zero_grad()
+            self.policy.critic_optimizer.zero_grad()
+            sample = self.buffer.get_sequential_rollout(self.model_horizon,
+                                                        self.model_batch_size,
+                                                        maximum_horizon=self.rollout_len)
+            policy_loss, entropy_loss, value_loss = self.jtac_loss(sample)
+            loss = policy_loss + entropy_loss * self.ent_coef + value_loss * self.vf_coef
+            loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(
+                chain(
+                    self.policy.critic.parameters(),
+                    self.policy.actor.parameters()),
+                self.max_grad_norm)
+
+            self.policy.actor_optimizer.step()
+            self.policy.critic_optimizer.step()
 
         logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self._n_updates += 1
 
-    def model_loss(self):
+    def discrete_model_loss(self, sample: SequentialRolloutSamples):
+        squeezed_obs, meta_data = SampleHandler.squeeze(sample)
+        squeezed_latent, q_latent_loss, e_latent_loss, perplexity = self.policy.get_latent(
+            squeezed_obs)
+        squeezed_pred_obs_dist = self.policy.decoder(squeezed_latent)
+        recon_loss = -squeezed_pred_obs_dist.log_prob(squeezed_obs).reshape(
+            squeezed_obs.shape[0], -1).sum(1).mean(0)
 
-        sample = self.buffer.sample(self.model_batch_size)
+        latent_tuple, next_latent_tuple = [DiscreteLatentTuple(*half_tensor) for half_tensor in zip(
+            *[SampleHandler.unsqueeze(tensor, meta_data) for tensor in squeezed_latent])]
 
-        actions = sample.actions
-        combined_obs = torch.cat([sample.observations, sample.next_observations], dim=0)
+        transition_losses = []
+        transition_dist_logits = torch.zeros_like(latent_tuple.encoding[:, 0])
+        for index in range(meta_data.horizon):
+            step_tuple, next_step_tuple = (DiscreteLatentTuple(*(tensor[:, index] for tensor in _tuple))
+                                           for _tuple in (latent_tuple, next_latent_tuple))
 
-        combined_latent_tuple = self.policy.get_latent(combined_obs)
-        pred_next_obs_dist = self.policy.decoder(combined_latent_tuple)
+            transition_dist = self.policy.transition_dist(step_tuple,
+                                                          sample.actions[:, index].flatten(),
+                                                          transition_dist_logits)
+            transition_losses.append(
+                -transition_dist.log_prob(next_step_tuple.encoding).reshape(
+                    sample.actions.shape[0], -1).sum(1).mean(0))
 
-        recon_loss = -pred_next_obs_dist.log_prob(combined_obs).sum(1).mean(0)
-        prior_state_dist = self.policy.make_normal_prior(combined_latent_tuple.dist)
-        prior_kl_loss = torch.distributions.kl_divergence(
-            combined_latent_tuple.dist, prior_state_dist).sum(1).mean(0)
+        transition_loss = sum(transition_losses) / meta_data.horizon
 
-        prev_state_dist, next_state_dist = self.policy.batch_chunk_distribution(
-            combined_latent_tuple.dist)
-        prev_embedding, _ = torch.chunk(combined_latent_tuple.embedding, 2, dim=0)
-        prev_rstate, _ = torch.chunk(combined_latent_tuple.rsample, 2, dim=0)
-        pred_next_state_dist = self.policy.transition_dist(
-            LatentTuple(prev_embedding, prev_state_dist, prev_rstate), actions)
-        transition_kl_loss = torch.distributions.kl_divergence(
-            pred_next_state_dist,
-            self.policy.transition_dist.detach_dist(next_state_dist)).sum(1).mean(0)
+        logger.record_mean("train/model/transition_loss", transition_loss.item())
+        logger.record_mean("train/model/e_latent_loss", e_latent_loss.item())
+        logger.record_mean("train/model/q_latent_loss", q_latent_loss.item())
+        logger.record_mean("train/model/perplexity", perplexity.item())
+        logger.record_mean("train/model/reconstruction", recon_loss.item())
 
-        model_loss = transition_kl_loss * self.trans_kl_coef + \
-            prior_kl_loss * self.prior_kl_coef + recon_loss
+        return transition_loss, recon_loss, q_latent_loss, e_latent_loss, perplexity
 
-        logger.record_mean("train/loss/model/transition_kl", transition_kl_loss.item())
-        logger.record_mean("train/loss/model/prior_kl", prior_kl_loss.item())
-        logger.record_mean("train/loss/model/reconstruction", recon_loss.item())
+    def jtac_loss(self,
+                  sample: SequentialRolloutSamples,
+                  r_encoding: Optional[torch.Tensor] = None,
+                  prev_terminations: Optional[torch.Tensor] = None):
+        local_log = namedtuple("Log", "policy entropy next_state_logp action")([], [], [], [])
 
-        return model_loss
+        squeezed_obs, meta_data = SampleHandler.squeeze(sample)
+        squeezed_latent, *_ = self.policy.get_latent(squeezed_obs)
 
-    def discrete_model_loss(self):
-        sample = self.buffer.sample(self.model_batch_size)
-        recon_loss, transition_loss, e_latent_loss, q_latent_loss, perplexity = self.policy.loss(
-            sample.observations, sample.next_observations, sample.actions)
-        model_loss = recon_loss + transition_loss + e_latent_loss + q_latent_loss
+        latent_tuple, next_latent_tuple = [DiscreteLatentTuple(*half_tensor) for half_tensor in zip(
+            *[SampleHandler.unsqueeze(tensor, meta_data) for tensor in squeezed_latent])]
 
-        logger.record_mean("train/loss/model/transition_kl", transition_loss.item())
-        logger.record_mean("train/loss/model/e_latent_loss", e_latent_loss.item())
-        logger.record_mean("train/loss/model/q_latent_loss", q_latent_loss.item())
-        logger.record_mean("train/loss/model/perplexity", perplexity.item())
-        logger.record_mean("train/loss/model/reconstruction", recon_loss.item())
+        values, next_values = SampleHandler.unsqueeze(
+            self.policy.critic(squeezed_latent), meta_data)
+        advantages, returns, td_errors = self.calculate_gae(values.squeeze(2).detach(),
+                                                            next_values.squeeze(2).detach(),
+                                                            sample.terminations,
+                                                            sample.rewards,
+                                                            self.reward_clip)
 
-        return model_loss
+        # Value loss using the TD(gae_lambda) target
+        value_loss = torch.nn.functional.smooth_l1_loss(values.flatten(), returns.flatten())
 
-    def a2c_loss(self):
-        self.buffer.compute_returns_and_advantage(
-            initial_pos_indices=(np.ones(self.buffer.n_envs, dtype=np.int32) *
-                                 (self.buffer.pos - 1 - self.rollout_len)),
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
-            rollout_size=self.rollout_len)
+        if self.enable_jtac:
+            # Initial transition dist logits
+            transition_dist_logits = torch.zeros_like(latent_tuple.encoding[:, 0])
 
-        for rollout_data in self.rollout_buffer.get(batch_size=None):
+            for index in range(meta_data.horizon):
+                step_tuple, next_step_tuple = (DiscreteLatentTuple(*(tensor[:, index] for tensor in _tuple))
+                                               for _tuple in (latent_tuple, next_latent_tuple))
 
-            actions = rollout_data.actions
-            if isinstance(self.action_space, gym.spaces.Discrete):
-                # Convert discrete action from float to long
-                actions = actions.long().flatten()
+                # Check termination condition for encodings
+                if r_encoding is not None:
+                    r_encoding = (torch.einsum("b...,b->b...",
+                                               r_encoding,
+                                               (1 - prev_terminations))
+                                  + torch.einsum("b...,b->b...",
+                                                 step_tuple.encoding,
+                                                 prev_terminations))
+                    step_tuple = DiscreteLatentTuple(
+                        step_tuple.logit, step_tuple.quantized, r_encoding)
 
-            # TODO: avoid second computation of everything because of the gradient
-            values, log_prob, entropy = self.policy.evaluate_actions(
-                rollout_data.observations, actions)
-            values = values.flatten()
+                # Policy reparametrization
+                act_dist = self.policy.actor(step_tuple, onehot=True)
+                onehot_action = self.policy.actor.make_onehot(
+                    sample.actions[:, index].flatten()).float()
+                # Measure action gradients
+                act_dist.probs.retain_grad()
+                raction = self.policy.actor.reparam(act_dist, onehot_action)
 
-            # Normalize advantage (not present in the original implementation)
-            advantages = rollout_data.advantages
-            if self.normalize_advantage:
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                # Transition reparametrization
+                with FreezeParameters([self.policy.transition_dist]):
+                    transition_dist = self.policy.transition_dist(
+                        step_tuple, raction, transition_dist_logits)
+                r_encoding = self.policy.transition_dist.reparam(
+                    transition_dist, next_step_tuple.encoding.detach())
+                prev_terminations = sample.terminations[:, index]
+                transition_dist_logits = transition_dist.logits
 
-            # Policy gradient loss
-            policy_loss = -(advantages * log_prob).mean()
+                # Policy loss
+                next_state_log_prob = transition_dist.log_prob(
+                    next_latent_tuple.encoding[:, index].detach()).reshape(td_errors.shape[0], -1).sum(1)
+                policy_loss = -(next_state_log_prob * td_errors[:, index].detach()).mean(0)
 
-            # Value loss using the TD(gae_lambda) target
-            value_loss = torch.nn.functional.mse_loss(rollout_data.returns, values)
+                # Actor entropy loss
+                act_entropy = act_dist.entropy()
+                entropy_loss = -torch.mean(act_entropy)
 
-            # Entropy loss favor exploration
-            if entropy is None:
-                # Approximate entropy when no analytical form
-                entropy_loss = -torch.mean(-log_prob)
-            else:
-                entropy_loss = -torch.mean(entropy)
+                local_log.entropy.append(entropy_loss)
+                local_log.action.append(act_dist.probs)
+                local_log.policy.append(policy_loss)
+                local_log.next_state_logp.append(next_state_log_prob.mean(0).item())
 
-            loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+            policy_loss = sum(local_log.policy) / meta_data.horizon
+            entropy_loss = sum(local_log.entropy) / meta_data.horizon
 
-        logger.record("train/a2c/entropy_loss", entropy_loss.item())
-        logger.record("train/a2c/policy_loss", policy_loss.item())
-        logger.record("train/a2c/value_loss", value_loss.item())
+            logger.record_mean("train/next_state_logp", next_state_logp.item())
+        else:
+            latent_tuple = DiscreteLatentTuple(
+                *(tensor.reshape(np.product(tensor.shape[:2]), *tensor.shape[2:]) for tensor in latent_tuple))
+            actor_dist = self.policy.actor(latent_tuple)
+            log_prob = actor_dist.log_prob(sample.actions.flatten())
 
-        return loss
+            a2c_loss = - log_prob * advantages.flatten().detach()
+            policy_loss = a2c_loss.mean()
+            entropy_loss = -actor_dist.entropy().mean()
 
-    def jtac_loss(self):
-        rstate = None
-        loss_list = namedtuple("Loss", "total policy value entropy")([], [], [], [])
-        for rollout_data in self.rollout_buffer.get_sequential_rollout(self.rollout_len):
+        logger.record_mean("train/entropy_loss", entropy_loss.item())
+        logger.record_mean("train/policy_loss", policy_loss.item())
+        logger.record_mean("train/value_loss", value_loss.item())
 
-            actions = rollout_data.actions
-            if isinstance(self.action_space, gym.spaces.Discrete):
-                # Convert discrete action from float to long
-                actions = actions.long().flatten()
+        return policy_loss, entropy_loss, value_loss
 
-            with torch.no_grad():
-                latent_tuple = self.policy.get_latent(rollout_data.observations)
-                next_latent_tuple = self.policy.get_latent(rollout_data.next_observations)
-            if rstate is not None:
-                rstate = latent_tuple.rsample * prev_terminations + (1 - prev_terminations) * rstate
-            else:
-                rstate = latent_tuple.rsample
-            latent_tuple = LatentTuple(latent_tuple.embedding, latent_tuple.dist, rstate)
+    def calculate_gae(self,
+                      values: torch.Tensor,
+                      next_values: torch.Tensor,
+                      terminations: torch.Tensor,
+                      rewards: torch.Tensor,
+                      reward_clip: Optional[float] = None):
+        assert len(rewards.shape) == 2
+        assert len(terminations.shape) == 2
+        assert len(values.shape) == 2
+        assert len(next_values.shape) == 2
 
-            values = self.policy.critic(latent_tuple)
-            next_values = self.policy.critic(next_latent_tuple)
-            td_target = (next_values * (1 - rollout_data.terminations.unsqueeze(1)) * self.gamma
-                         + rollout_data.rewards.unsqueeze(1)).detach()
-            td_error = td_target - values
+        if reward_clip:
+            rewards = torch.clamp(rewards, min=-reward_clip, max=reward_clip)
+        td_targets = next_values * (1 - terminations) * self.gamma + rewards
+        td_errors = td_targets - values
 
-            act_dist = self.policy.actor(latent_tuple, onehot=True)
-            raction = self.policy.actor.reparam(act_dist, actions)
+        returns = torch.zeros_like(td_errors)
+        advantages = torch.zeros_like(td_errors)
 
-            with FreezeParameters([self.policy.transition_dist]):
-                transition_dist = self.policy.transition_dist(latent_tuple, raction)
+        advantage = torch.zeros_like(td_errors[:, 0])
+        for index in reversed(range(td_targets.shape[1])):
+            advantage = td_errors[:, index] + advantage * \
+                self.gae_lambda * self.gamma * (1 - terminations[:, index])
+            advantages[:, index] = advantage
+            returns[:, index] = advantage + values[:, index]
 
-            # Do reparam
-            rstate = self.policy.transition_dist.reparam(
-                transition_dist, next_latent_tuple.rsample.detach())
-            prev_terminations = rollout_data.terminations.unsqueeze(1)
+        return advantages, returns, td_errors
 
-            # Policy gradient loss
-            next_state_log_prob = transition_dist.log_prob(next_latent_tuple.rsample.detach())
-            policy_loss = -(next_state_log_prob * td_error.detach()).sum(1).mean(0)
 
-            # Value loss using the TD(gae_lambda) target
-            values = values
-            value_loss = torch.nn.functional.l1_loss(values, td_target)
+class SquuezedSampleMeta(NamedTuple):
+    batch_size: int
+    horizon: int
+    termination_indexes: Tuple[torch.Tensor]
 
-            # Actor entropy loss
-            act_entropy = act_dist.entropy()
-            entropy_loss = -torch.mean(act_entropy)
 
-            loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
-            loss_list.total.append(loss)
-            loss_list.entropy.append(entropy_loss)
-            loss_list.value.append(value_loss)
-            loss_list.policy.append(policy_loss)
+class SampleHandler():
 
-        logger.record_mean("train/loss/ac/entropy_loss",
-                           sum(loss_list.entropy).item() / self.rollout_len)
-        logger.record_mean("train/loss/ac/policy", sum(loss_list.policy).item() / self.rollout_len)
-        logger.record_mean("train/loss/ac/value", sum(loss_list.value).item() / self.rollout_len)
+    @staticmethod
+    def squeeze(sample: SequentialRolloutSamples):
+        assert len(sample.terminations.shape) == 2
+        batch_size, horizon, *shape = sample.observations.shape
 
-        return sum(loss_list.total) / self.rollout_len
+        termination_indexes = sample.terminations[:-1].nonzero(as_tuple=True)
+        squeezed_observation = torch.cat([
+            sample.observations.reshape(batch_size * horizon, *shape),
+            sample.next_observations[:, -1].reshape(batch_size, *shape),
+            sample.next_observations[termination_indexes]
+        ])
+        return squeezed_observation, SquuezedSampleMeta(
+            batch_size, horizon, termination_indexes)
+
+    @staticmethod
+    def unsqueeze(squeezed: torch.Tensor, meta_data: SquuezedSampleMeta):
+        batch_size, horizon, termination_indexes = meta_data
+        shape = squeezed.shape[1:]
+        upper_index = batch_size * horizon
+        observation = squeezed[:upper_index]
+        observation = observation.reshape(batch_size, horizon, *shape)
+
+        next_upper_index = upper_index + batch_size
+        next_observation = torch.cat([
+            observation[:, 1:],
+            squeezed[upper_index: next_upper_index].reshape(batch_size, 1, *shape)
+        ], dim=1)
+        next_observation[termination_indexes] = squeezed[next_upper_index:]
+
+        return observation, next_observation

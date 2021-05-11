@@ -89,8 +89,7 @@ class CategoricalDistributionModel(DenseModel):
     @staticmethod
     def reparametrize(dist: Union[torch.distributions.Categorical,
                                   torch.distributions.OneHotCategorical],
-                      sample: torch.Tensor,
-                      onehot: bool = False):
+                      sample: torch.Tensor):
         assert sample.shape == dist.probs.shape
         return dist.probs + (sample - dist.probs).detach()
 

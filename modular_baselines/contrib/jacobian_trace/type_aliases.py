@@ -9,10 +9,7 @@ class LatentTuple(NamedTuple):
 
 class DiscreteLatentTuple(NamedTuple):
     logit: torch.Tensor
-    # q_latent_loss: torch.Tensor
-    # e_latent_loss: torch.Tensor
     quantized: torch.Tensor
-    # perplexity: torch.Tensor
     encoding: torch.Tensor
 
 class TransitionTuple(NamedTuple):
