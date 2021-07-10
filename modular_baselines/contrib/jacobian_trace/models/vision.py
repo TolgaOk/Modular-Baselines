@@ -1,12 +1,13 @@
 import numpy as np
 import torch
+from typing import Tuple
 
 
 class ObservationEncoder(torch.nn.Module):
     def __init__(self,
                  depth: int = 32,
                  stride: int = 2,
-                 shape: tuple = (3, 64, 64),
+                 shape: Tuple[int] = (3, 64, 64),
                  activation: torch.nn.Module = torch.nn.ReLU):
         super().__init__()
         self.convolutions = torch.nn.Sequential(
@@ -17,7 +18,7 @@ class ObservationEncoder(torch.nn.Module):
             torch.nn.Conv2d(2 * depth, 4 * depth, 4, stride),
             activation(),
             torch.nn.Conv2d(4 * depth, 8 * depth, 4, stride),
-            activation(),
+            # activation(),
         )
         self.shape = shape
         self.stride = stride
@@ -27,8 +28,8 @@ class ObservationEncoder(torch.nn.Module):
         batch_shape = observation.shape[:-3]
         img_shape = observation.shape[-3:]
         embed = self.convolutions(observation.reshape(-1, *img_shape))
-        embed = torch.reshape(embed, (*batch_shape, -1))
-        return embed
+        # embed = torch.reshape(embed, (*batch_shape, -1))
+        return embed.permute(0, 2, 3, 1)
 
     @property
     def embed_size(self) -> int:
@@ -37,7 +38,7 @@ class ObservationEncoder(torch.nn.Module):
         conv3_shape = conv_out_shape(conv2_shape, 0, 4, self.stride)
         conv4_shape = conv_out_shape(conv3_shape, 0, 4, self.stride)
         embed_size = 8 * self.depth * np.prod(conv4_shape).item()
-        return embed_size
+        return embed_size, conv4_shape
 
 
 class ObservationDecoder(torch.nn.Module):
@@ -46,7 +47,7 @@ class ObservationDecoder(torch.nn.Module):
                  stride: int = 2,
                  activation: torch.nn.Module = torch.nn.ReLU,
                  embed_size: int = 1024,
-                 shape: tuple = (3, 64, 64)):
+                 shape: Tuple[int] = (3, 64, 64)):
         super().__init__()
         self.depth = depth
         self.shape = shape
@@ -89,6 +90,8 @@ class ObservationDecoder(torch.nn.Module):
         :param features: size(*batch_shape, embed_size)
         :return: obs_dist = size(*batch_shape, *self.shape)
         """
+        features = features.permute(0, 3, 1, 2)
+        features = features.reshape(features.shape[0], -1)
         batch_shape = features.shape[:-1]
         embed_size = features.shape[-1]
         squeezed_size = np.prod(batch_shape).item()

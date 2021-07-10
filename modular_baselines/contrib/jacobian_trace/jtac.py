@@ -96,16 +96,16 @@ class JTAC(A2C):
                      device=device)
 
     def train(self) -> None:
-        for iteration in range(self.policy_iteration_per_update):
+        for _ in range(self.policy_iteration_per_update):
             self.policy.actor_optimizer.zero_grad()
             self.policy.critic_optimizer.zero_grad()
-            sample = self.buffer.get_sequential_rollout(self.model_horizon,
-                                                        self.model_batch_size,
+            sample = self.buffer.get_sequential_rollout(self.policy_nstep,
+                                                        self.policy_batch_size,
                                                         maximum_horizon=self.rollout_len)
             policy_loss, entropy_loss, value_loss = self.jtac_loss(sample)
             loss = policy_loss + entropy_loss * self.ent_coef + value_loss * self.vf_coef
             loss.backward()
-
+    
             torch.nn.utils.clip_grad_norm_(
                 chain(
                     self.policy.critic.parameters(),
@@ -115,7 +115,7 @@ class JTAC(A2C):
             self.policy.actor_optimizer.step()
             self.policy.critic_optimizer.step()
 
-        for iteration in range(self.model_iteration_per_update):
+        for _ in range(self.model_iteration_per_update):
             self.policy.model_optimizer.zero_grad()
             sample = self.buffer.get_sequential_rollout(self.model_horizon, self.model_batch_size)
             model_loss = self.discrete_model_loss(sample)
@@ -141,11 +141,12 @@ class JTAC(A2C):
 
     def discrete_model_loss(self, sample: SequentialRolloutSamples):
         squeezed_obs, meta_data = SampleHandler.squeeze(sample)
+        squeezed_obs = self.policy._preprocess(squeezed_obs)
         squeezed_latent, q_latent_loss, e_latent_loss, perplexity = self.policy.get_latent(
             squeezed_obs)
         squeezed_pred_obs_dist = self.policy.decoder(squeezed_latent)
-        recon_loss = -squeezed_pred_obs_dist.log_prob(squeezed_obs).reshape(
-            squeezed_obs.shape[0], -1).sum(1).mean(0)
+        recon_loss = -squeezed_pred_obs_dist.log_prob(squeezed_obs).mean(0)
+        # recon_loss = torch.nn.functional.mse_loss(squeezed_pred_obs_dist.base_dist.loc, squeezed_obs)
 
         latent_tuple, next_latent_tuple = [DiscreteLatentTuple(*half_tensor) for half_tensor in zip(
             *[SampleHandler.unsqueeze(tensor, meta_data) for tensor in squeezed_latent])]
@@ -180,6 +181,7 @@ class JTAC(A2C):
         local_log = namedtuple("Log", "policy entropy next_state_logp action")([], [], [], [])
 
         squeezed_obs, meta_data = SampleHandler.squeeze(sample)
+        squeezed_obs = self.policy._preprocess(squeezed_obs)
         squeezed_latent, *_ = self.policy.get_latent(squeezed_obs)
 
         latent_tuple, next_latent_tuple = [DiscreteLatentTuple(*half_tensor) for half_tensor in zip(
@@ -234,7 +236,7 @@ class JTAC(A2C):
 
                 # Policy loss
                 next_state_log_prob = transition_dist.log_prob(
-                    next_latent_tuple.encoding[:, index].detach()).reshape(td_errors.shape[0], -1).sum(1)
+                    next_step_tuple.encoding.detach()).reshape(td_errors.shape[0], -1).sum(1)
                 policy_loss = -(next_state_log_prob * td_errors[:, index].detach()).mean(0)
 
                 # Actor entropy loss
@@ -249,7 +251,8 @@ class JTAC(A2C):
             policy_loss = sum(local_log.policy) / meta_data.horizon
             entropy_loss = sum(local_log.entropy) / meta_data.horizon
 
-            # logger.record_mean("train/next_state_logp", next_state_logp.item())
+            logger.record_mean("train/next_state_logp",
+             sum(local_log.next_state_logp) / meta_data.horizon)
         else:
             latent_tuple = DiscreteLatentTuple(
                 *(tensor.reshape(np.product(tensor.shape[:2]), *tensor.shape[2:]) for tensor in latent_tuple))
@@ -281,7 +284,6 @@ class JTAC(A2C):
             rewards = torch.clamp(rewards, min=-reward_clip, max=reward_clip)
         td_targets = next_values * (1 - terminations) * self.gamma + rewards
         td_errors = td_targets - values
-
         returns = torch.zeros_like(td_errors)
         advantages = torch.zeros_like(td_errors)
 

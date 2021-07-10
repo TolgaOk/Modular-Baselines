@@ -5,6 +5,8 @@ import torch.distributions as td
 import torch.nn as nn
 from typing import Union
 
+from torch.quantization.observer import ObserverBase
+
 from modular_baselines.contrib.jacobian_trace.type_aliases import DiscreteLatentTuple
 from modular_baselines.contrib.jacobian_trace.models.vqvae import VectorQuantizer
 from modular_baselines.contrib.jacobian_trace.models.dense import DenseModel, CategoricalDistributionModel
@@ -176,6 +178,8 @@ class DiscreteJTACModel(torch.nn.Module):
             n_embeddings=n_embeddings,
             embedding_size=embedding_size)
 
+        self._init_weights()
+
         self.model_optimizer = torch.optim.Adam(
             chain(self.encoder.parameters(),
                   self.decoder.parameters(),
@@ -189,7 +193,7 @@ class DiscreteJTACModel(torch.nn.Module):
         return self.encoder(observation)
 
     def _preprocess(self, tensor: torch.Tensor) -> torch.Tensor:
-        return tensor
+        return tensor.float() / 255
 
     def _forward(self, observation: torch.Tensor):
         latent_tuple, *_ = self.get_latent(observation)
@@ -213,21 +217,25 @@ class DiscreteJTACModel(torch.nn.Module):
         log_prob = actor_dist.log_prob(action)
         return values, log_prob, entropy
 
-    # Must have
-    def loss(self,
-             observations: torch.Tensor,
-             next_observations: torch.Tensor,
-             actions: torch.Tensor):
-        combined_obs = torch.cat([observations, next_observations], dim=0)
-        combined_latent, q_latent_loss, e_latent_loss, perplexity = self.get_latent(combined_obs)
-        pred_obs_dist = self.decoder(combined_latent)
+    def _init_weights(self, common_gain=np.sqrt(2)):
+        module_gains = {
+            self.transition_dist: 1,
+            self.actor: 0.01,
+            self.critic: 1,
+        }
+        for module, gain in module_gains.items():
+            module.apply(lambda _module: self._apply_weight(_module, gain, common_gain))
 
-        latent_tuple, next_latent_tuple = [DiscreteLatentTuple(*half_tensor) for half_tensor in zip(
-            *[torch.chunk(tensor, 2, dim=0) for tensor in combined_latent])]
-        trans_dist = self.transition_dist(latent_tuple, actions)
-        transition_loss = -self.transition_dist.log_prob(trans_dist, next_latent_tuple.encoding)
-        transition_loss = transition_loss.reshape(observations.shape[0], -1).sum(1).mean(0)
-
-        recon_loss = -pred_obs_dist.log_prob(combined_obs).sum(1).mean(0)
-
-        return recon_loss, transition_loss, e_latent_loss, q_latent_loss, perplexity
+    def _apply_weight(self, module, last_gain, common_gain):
+        if isinstance(module, DenseModel):
+            layers = tuple(module.children())[0]
+            for index, layer in enumerate(layers):
+                if isinstance(layer, (nn.Linear, nn.Conv2d)):
+                    torch.nn.init.xavier_uniform_(
+                        layer.weight,
+                        gain=common_gain if index < (len(layers) - 1 ) else last_gain)
+                    if layer.bias is not None:
+                        layer.bias.data.fill_(0.0)
+        if isinstance(module, torch.nn.Conv2d):
+            torch.nn.init.dirac_(module.weight)
+            module.bias.data.fill_(0.0)

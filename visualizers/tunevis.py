@@ -43,7 +43,7 @@ class TuneScalarRender():
         self.param_tuple = namedtuple("ParamTuple", " ".join(self.params))
 
         for index, row in self.study_df.iterrows():
-            if row.state == "FAIL":
+            if not row.state == "COMPLETE":
                 continue
             row = row[self.params]
             trial_name = "Trial_{:4d}".format(index + 1).replace(" ", "0")
@@ -104,7 +104,7 @@ class TuneScalarRender():
 
     def make_param_checkbox(self, n_columns=3):
         grid = ipywidgets.GridspecLayout(
-            int(np.ceil(len(self.params) // n_columns)), n_columns, width="100%")
+            int(np.ceil(len(self.params) / n_columns)), n_columns, width="100%")
         for index, param in enumerate(self.params):
             widget = ipywidgets.Checkbox(
                 value=False,

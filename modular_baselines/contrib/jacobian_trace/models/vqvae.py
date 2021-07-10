@@ -42,7 +42,7 @@ class VectorQuantizer(nn.Module):
     def discrete_encoding(self, inputs):
         # BxHxWxD -> BxHxWxE
         # Flatten input
-        flat_input = inputs.view(-1, self._embedding_dim)
+        flat_input = inputs.reshape(-1, self._embedding_dim)
 
         # Calculate distances
         distances = (torch.sum(flat_input**2, dim=1, keepdim=True)

@@ -26,40 +26,20 @@ class JTACBuffer(GeneralBuffer):
         assert maximum_horizon >= rollout_size, "Maximum horizon must be larger than rollout size"
 
         lower_index = self.pos - maximum_horizon
-        pos_indices = np.random.randint(low=lower_index, high=self.pos-rollout_size+1, size=batch_size)
+        pos_indices = np.random.randint(
+            low=lower_index, high=self.pos-rollout_size+1, size=batch_size)
         pos_indices = pos_indices.reshape(-1, 1) + np.arange(rollout_size).reshape(1, -1)
 
-        env_indices = np.random.randint(0, self.n_envs, size=(
-            batch_size, 1)).repeat(rollout_size, axis=1)
+        env_indices = np.concatenate(
+            [np.random.permutation(self.n_envs)
+             for _ in range(np.ceil(batch_size / self.n_envs).astype(np.int32).item())])
+        env_indices  = env_indices[:batch_size].reshape(-1, 1).repeat(rollout_size, axis=1)
 
         return self._get_rollout_samples(pos_indices=pos_indices,
                                          env_indices=env_indices)
 
-    def compute_returns_and_advantage(self,
-                                      rollout_size: int,
-                                      initial_pos_indices: np.ndarray,
-                                      gamma: float,
-                                      gae_lambda: Optional[float] = 1.0
-                                      ) -> None:
-        assert self.size() > rollout_size, (
-            ("Buffer size {} must be at least 1 larger"
-             " than the rollout size {}").format(self.size(), rollout_size))
-        pos_indices = initial_pos_indices - 1
-
-        advantage = 0
-        env_indices = np.arange(self.n_envs)
-        for index in reversed(range(rollout_size)):
-            pos_indices = initial_pos_indices + index
-
-            termination = (1 - self.dones[pos_indices, env_indices])
-            td_error = (self.values[pos_indices + 1, env_indices] * gamma * termination
-                        + self.rewards[pos_indices, env_indices]
-                        - self.values[pos_indices, env_indices])
-
-            advantage = td_error + advantage * gamma * gae_lambda * termination
-            self.advantages[pos_indices, env_indices] = advantage
-            self.returns[pos_indices, env_indices] = advantage + \
-                self.values[pos_indices, env_indices]
+    def compute_returns_and_advantage(self) -> None:
+        raise NotImplementedError()
 
     def _get_rollout_samples(self,
                              pos_indices: np.ndarray,

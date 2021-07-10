@@ -5,7 +5,7 @@ from typing import Union, Tuple, Optional
 class DenseModel(torch.nn.Module):
     def __init__(self,
                  input_size: int,
-                 output_size: tuple,
+                 output_size: Tuple[int],
                  layers: int,
                  hidden_size: int,
                  output_shape: Optional[tuple] = None,
@@ -33,6 +33,26 @@ class DenseModel(torch.nn.Module):
         if self.output_shape:
             return output.reshape(output.shape[0], *self.output_shape)
         return output
+
+
+class GruModel(DenseModel):
+
+    def build_model(self) -> torch.nn.Module:
+        self.pre_gru = torch.nn.Sequential(
+            torch.nn.Linear(self.input_size, self.hidden_size),
+            self.activation())
+        self.gru = torch.nn.GRUCell(self.hidden_size, self.hidden_size)
+        self.output = torch.nn.Linear(self.hidden_size, self.output_size)
+
+    def forward(self, features: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        pre_hidden = self.pre_gru(features)
+        hidden = self.gru(pre_hidden, hidden)
+        if self.output_shape:
+            return self.output(hidden).reshape(hidden.shape[0], *self.output_shape), hidden
+        return self.output(hidden), hidden
+
+    def init_hidden(self, batch_size):
+        return torch.zeros((batch_size, self.hidden_size), device=self.output.weight.device)
 
 
 class NormalDistributionModel(DenseModel):
