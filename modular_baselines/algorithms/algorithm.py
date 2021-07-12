@@ -1,26 +1,38 @@
-import numpy as np
-import torch
-import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import List, Optional, Union
 
-from stable_baselines3.common import logger
-from stable_baselines3.common.buffers import BaseBuffer
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import BaseCollector
-from modular_baselines.algorithms.callbacks import BaseAlgorithmCallback
+from modular_baselines.policies.policy import BasePolicy
+
+
+class BaseAlgorithmCallback(ABC):
+    """ Base class for buffer callbacks that only supports:
+    on_training_start, _on_training_start, and on_training_end calls.
+    """
+
+    @abstractmethod
+    def on_training_start(self, *args) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def on_step(self, *args) -> bool:
+        pass
+
+    @abstractmethod
+    def on_training_end(self, *args) -> None:
+        pass
 
 
 class BaseAlgorithm(ABC):
     """ Base abstract class for Algorithms """
 
     @abstractmethod
-    def learn(self):
+    def learn(self, total_timesteps: int) -> None:
         pass
 
     @abstractmethod
-    def train(self):
+    def train(self) -> None:
         pass
 
 
@@ -38,20 +50,21 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     """
 
     def __init__(self,
-                 policy: torch.nn.Module,
-                 buffer: BaseBuffer,
+                 policy: BasePolicy,
                  collector: BaseCollector,
-                 env: VecEnv,
                  rollout_len: int,
-                 callbacks: List[BaseAlgorithmCallback] = [],
-                 device: str = "cpu"):
-        self.policy = policy.to(device)
-        self.buffer = buffer
+                 callbacks: Optional[Union[List[BaseAlgorithmCallback],
+                                           BaseAlgorithmCallback]] = None):
+        self.policy = policy
         self.collector = collector
-        self.env = env
-        self.device = device
-        self.callbacks = callbacks
         self.rollout_len = rollout_len
+
+        self.buffer = self.collector.buffer
+        self.num_env = self.collector.env.num_env
+
+        if not isinstance(callbacks, (list, tuple)):
+            callbacks = [callbacks] if callbacks is not None else []
+        self.callbacks = callbacks
 
     def learn(self, total_timesteps: int) -> None:
         """ Main loop for running the on policy algorithm
@@ -71,7 +84,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         while num_timesteps < total_timesteps:
 
             num_timesteps = self.collector.collect(self.rollout_len)
-            self.train()
+            loss_dict = self.train()
             for callback in self.callbacks:
                 callback.on_step(locals())
             iteration += 1

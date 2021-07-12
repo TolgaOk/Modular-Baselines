@@ -1,110 +1,245 @@
+from typing import List, Optional, Tuple, Union, Dict, Generator
+from abc import abstractmethod
+from gym import spaces
 import numpy as np
 import torch
-import time
-from collections import deque
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
-
-from stable_baselines3.common import logger
-from stable_baselines3.common.utils import safe_mean, configure_logger
-from stable_baselines3.common.buffers import BaseBuffer, RolloutBuffer
+from torch.types import Device
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-from stable_baselines3.a2c.a2c import A2C as SB3_A2C
 
-from modular_baselines.collectors.collector import OnPolicyCollector
-from modular_baselines.collectors.callbacks import BaseCollectorCallback
-from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm
-from modular_baselines.algorithms.callbacks import BaseAlgorithmCallback
-from modular_baselines.buffers.buffer import GeneralBuffer
+from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
+from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
+from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
+from modular_baselines.algorithms.advantages import calculate_gae
+from modular_baselines.policies.policy import BasePolicy
 
 
-class A2C(OnPolicyAlgorithm, SB3_A2C):
-    """ A2C on policy algorithm.
-        Based on the implementation given within Stable-Baselines3
+class A2CPolicy(BasePolicy):
+    """ Base A2C class for different frameworks """
 
-    Args:
-        policy (torch.nn.Module): Policy module
-        rollout_buffer (RolloutBuffer): Rollout buffer
-        collector (OnPolicyCollector): Experience Collector
-        env (VecEnv): Vectorized environment
-        rollout_len (int): Length of the rollout
-        ent_coef (float): Entropy coefficient/multiplier
-        vf_coef (float): Value loss coefficient/multiplier
-        max_grad_norm (float): Maximum allowed gradient norm
-        normalize_advantage (bool, optional): Whether to normalize the
-            advantage or not. Defaults to False.
-        callbacks (List[BaseAlgorithmCallback], optional): Algorithm callbacks.
-            Defaults to [].
-        device (str, optional): Torch device. Defaults to "cpu".
+    @abstractmethod
+    def update_parameters(self, sample: np.ndarray) -> Dict[str, float]:
+        """ Update policy parameters using the given sample and a2c update mechanism.
 
-    Raises:
-        ValueError: Policy class must have "optimizer" and "evaluate_actions"
-            members
-    """
+        Args:
+            sample (np.ndarray): Sample that contains at least observation, next_observation,
+                reward, termination, action, and policy_state if the policy is a reccurent policy.
 
-    def __init__(self,
-                 policy: torch.nn.Module,
-                 rollout_buffer: GeneralBuffer,
-                 collector: OnPolicyCollector,
-                 env: VecEnv,
-                 rollout_len: int,
-                 ent_coef: float,
-                 vf_coef: float,
-                 gamma: float,
-                 gae_lambda: float,
-                 max_grad_norm: float,
-                 batch_size: int = None,
-                 normalize_advantage: bool = False,
-                 callbacks: List[BaseAlgorithmCallback] = [],
-                 device: str = "cpu"):
-
-        for name in ("optimizer", "evaluate_actions"):
-            if not hasattr(policy, name):
-                raise ValueError("Policy has no attribute {}".format(name))
-
-        OnPolicyAlgorithm.__init__(self,
-                                   policy=policy,
-                                   buffer=rollout_buffer,
-                                   collector=collector,
-                                   env=env,
-                                   rollout_len=rollout_len,
-                                   callbacks=callbacks,
-                                   device=device)
-        self.rollout_buffer = RolloutBufferWrapper(
-            self.buffer, rollout_len, batch_size)
-        self.rollout_len = rollout_len
-        self.gamma = gamma
-        self.batch_size = batch_size
-        self.gae_lambda = gae_lambda
-        self.action_space = self.env.action_space
-        self.observation_space = self.env.observation_space
-        self._n_updates = 0
-
-        self.ent_coef = ent_coef
-        self.vf_coef = vf_coef
-        self.max_grad_norm = max_grad_norm
-        self.normalize_advantage = normalize_advantage
-
-    def train(self) -> None:
-        """ Train method of the SB3 """
-        self.buffer.compute_returns_and_advantage(
-            rollout_size=self.rollout_len,
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda)
-        SB3_A2C.train(self)
-
-    def _update_learning_rate(self, *args):
+        Returns:
+            Dict[str, float]: Dictionary of losses to log
+        """
         pass
 
 
-class RolloutBufferWrapper():
+class A2C(OnPolicyAlgorithm):
+    """ A2C agent
 
-    def __init__(self, buffer: GeneralBuffer, rollout_size: int, batch_size: int):
-        self.buffer = buffer
-        self.rollout_size = rollout_size
-        self.batch_size = batch_size
+    Args:
+        policy (A2CPolicy): A2C policy of the selected framework
+        collector (RolloutCollector): Rollout collector instance
+        rollout_len (int): Length of the rollout per update
+        ent_coef (float): Entropy loss multiplier
+        value_coef (float): Value loss multiplier
+        gamma (float): Discount rate
+        gae_lambda (float): Eligibility trace lambda parameter
+        max_grad_norm (float): Gradient clipping magnitude
+        callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]],
+            optional): Algorithm callback(s). Defaults to None.
+    """
 
-    def __getattr__(self, name: str):
-        return getattr(self.buffer, name)
+    def __init__(self,
+                 policy: A2CPolicy,
+                 collector: RolloutCollector,
+                 rollout_len: int,
+                 ent_coef: float,
+                 value_coef: float,
+                 gamma: float,
+                 gae_lambda: float,
+                 max_grad_norm: float,
+                 callbacks: Optional[Union[List[BaseAlgorithmCallback],
+                                           BaseAlgorithmCallback]] = None):
+        super().__init__(policy=policy,
+                         collector=collector,
+                         rollout_len=rollout_len,
+                         callbacks=callbacks)
 
-    def get(self, **kwargs):
-        return self.buffer.get_rollout(self.rollout_size, self.batch_size)
+        self.gamma = gamma
+        self.gae_lambda = gae_lambda
+        self.ent_coef = ent_coef
+        self.value_coef = value_coef
+        self.max_grad_norm = max_grad_norm
+
+    def train(self) -> Dict[str: float]:
+        """ One step traning. This will be called once per rollout.
+
+        Returns:
+            Dict[str: float]: Dictionary of losses to log
+        """
+        sample = self.buffer.sample(batch_size=self.num_env,
+                                    rollout_len=self.rollout_len)
+        return self.policy.update_parameters(
+            sample,
+            value_coef=self.value_coef,
+            ent_coef=self.ent_coef,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda,
+            max_grad_norm=self.max_grad_norm)
+
+    @staticmethod
+    def setup(env: VecEnv,
+              policy: A2CPolicy,
+              rollout_len: int,
+              ent_coef: float,
+              value_coef: float,
+              gamma: float,
+              gae_lambda: float,
+              max_grad_norm: float,
+              buffer_callbacks: Optional[Union[List[BaseBufferCallback],
+                                               BaseBufferCallback]] = None,
+              collector_callback: Optional[Union[List[BaseCollectorCallback],
+                                                 BaseCollectorCallback]] = None,
+              algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
+                                                  BaseAlgorithmCallback]] = None,
+              ) -> "A2C":
+        """ Setup and A2C agent for the given environment with the given policy.
+
+        Args:
+            env (VecEnv): Vectorized gym environment
+            policy (A2CPolicy): A2C policy of the selected framework
+            rollout_len (int): Length of the rollout per update
+            ent_coef (float): Entropy loss multiplier
+            value_coef (float): Value loss multiplier
+            gamma (float): Discount rate
+            gae_lambda (float): Eligibility trace lambda parameter
+            max_grad_norm (float): Gradient clipping magnitude
+            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]],
+                optional): Buffer callback(s). Defaults to None.
+            collector_callbacks (Optional[Union[List[BaseCollectorCallback],
+                BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
+            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback],
+                BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
+
+        Raises:
+            NotImplementedError: If the observation space is not Box
+            NotImplementedError: If the action space is not Discrete
+
+        Returns:
+            A2C: a2c agent
+        """
+        # TODO: Add different observatoin spaces
+        observation_space = env.observation_space
+        # TODO: Add different action spaces
+        action_space = env.action_space
+
+        if not isinstance(observation_space, spaces.Box):
+            raise NotImplementedError("Only Box observations are available")
+        if not isinstance(action_space, spaces.Discrete):
+            raise NotImplementedError("Only Discrete actions are available")
+        policy_states_dtype = []
+        # Check for reccurent policy
+        policy_state = policy.init_state()
+        if policy_state is not None:
+            policy_states_dtype = [("policy_state", np.float32, policy_state.shape)]
+
+        struct = np.dtype([
+            ("observation", np.float32, observation_space.shape),
+            ("next_observation", np.float32, observation_space.shape),
+            ("action", np.int32, (1,)),
+            ("reward", np.float32, (1,)),
+            ("termination", np.float32, (1,)),
+            *policy_states_dtype
+        ])
+        buffer = Buffer(struct, rollout_len, env.num_envs, buffer_callbacks)
+        collector = RolloutCollector(env, buffer, policy, collector_callback)
+        return A2C(policy, collector, rollout_len, ent_coef, value_coef,
+                   gamma, gae_lambda, max_grad_norm, algorithm_callbacks)
+
+
+class TorchA2CPolicy(A2CPolicy):
+    """ Pytorch A2C Policy base class """
+
+    @property
+    @abstractmethod
+    def device(self) -> Device:
+        pass
+
+    @property
+    @abstractmethod
+    def optimizer(self) -> torch.optim.Optimizer:
+        pass
+
+    @property
+    @abstractmethod
+    def parameters(self) -> Generator[None, torch.nn.parameter.Parameter, None]:
+        pass
+
+    @abstractmethod
+    def evaluate_rollout(self,
+                         observation: torch.Tensor,
+                         policy_state: Union[None, torch.Tensor],
+                         action: torch.Tensor,
+                         last_next_obseration: torch.Tensor,
+                         ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """ Forward pass the given rollout. This is useful for both the advantage calculation
+        and bacward pass. Note: BS -> batch size, R: rollout length
+
+        Args:
+            observation (torch.Tensor): Observation tensor with the shape (BS, R, *)
+            policy_state (Union[None, torch.Tensor]): Policy state for reccurent models. None
+                will be given if the buffer does not contain "policy_state" field.
+            action (torch.Tensor): Action tensor with the shape (BS, R, *)
+            last_next_obseration (torch.Tensor): [description]: Last observation tensor to
+                calculate last value with the shape: (BS, *D)
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: values,
+                log_probs, entropies, last_value
+        """
+        pass
+
+    def update_parameters(self,
+                          sample: np.ndarray,
+                          value_coef: float,
+                          ent_coef: float,
+                          gamma: float,
+                          gae_lambda: float,
+                          max_grad_norm: float,
+                          ) -> Dict[str: float]:
+        """ Pytorch A2C parameter update method """
+        batch_size, rollout_size = sample.shape
+        policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
+        values, log_probs, entropies, last_value = self.evaluate_rollout(
+            *map(lambda array: torch.from_numpy(array).to(self.device),
+                 (sample["observation"],
+                  policy_state,
+                  sample["action"],
+                  sample["next_observation"][:, -1]))
+        )
+
+        advantages, returns = calculate_gae(
+            rewards=sample["reward"],
+            terminations=sample["termination"],
+            values=values.detach().cpu().numpy(),
+            last_value=last_value,
+            gamma=gamma,
+            gae_lambda=gae_lambda)
+
+        advantages = torch.from_numpy(advantages).to(self.device)
+        returns = torch.from_numpy(returns).to(self.device)
+
+        values, advantages, returns, log_probs = map(
+            lambda tensor: tensor.reshape(batch_size * rollout_size, 1),
+            (values, advantages, returns, log_probs))
+
+        value_loss = torch.nn.functional.mse_loss(values, returns)
+        policy_loss = (-log_probs * advantages).mean()
+        entropy_loss = -entropies.mean()
+        loss = value_loss * value_coef + policy_loss + entropy_loss * ent_coef
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+        self.optimizer.step()
+
+        return dict(value_loss=value_loss.item(),
+                    policy_loss=policy_loss.item(),
+                    entropy_loss=entropy_loss.item())
