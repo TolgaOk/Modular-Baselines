@@ -82,21 +82,21 @@ class TestBuffer(unittest.TestCase):
         self.assertRaises(AssertionError,
                           buffer.sample,
                           batch_size=1000,
-                          rollout_size=26)
+                          rollout_len=26)
         self.assertRaises(AssertionError,
                           buffer.sample,
                           batch_size=1000,
-                          rollout_size=5,
+                          rollout_len=5,
                           sampling_length=26)
         self.assertRaises(AssertionError,
                           buffer.sample,
                           batch_size=1000,
-                          rollout_size=5,
+                          rollout_len=5,
                           sampling_length=1)
         self.assertRaises(AssertionError,
                           buffer.sample,
                           batch_size=1000,
-                          rollout_size=5,
+                          rollout_len=5,
                           sampling_length=-1)
 
     def test_sample_rollout(self):
@@ -109,8 +109,8 @@ class TestBuffer(unittest.TestCase):
                          "reward": np.ones((2, 1)),
                          "termination": np.ones((2, 1)),
                          })
-        # batch_size = #env, rollout_size=buffer.capacity
-        sample = buffer.sample(batch_size=2, rollout_size=5)
+        # batch_size = #env, rollout_len=buffer.capacity
+        sample = buffer.sample(batch_size=2, rollout_len=5)
         self.assertTrue(np.all(sample["action"] == np.stack(actions, axis=1)))
 
     def test_sample_valid_items(self):
@@ -122,7 +122,7 @@ class TestBuffer(unittest.TestCase):
                          "reward": -np.ones((2, 1)),
                          "termination": -np.ones((2, 1)),
                          })
-        sample = buffer.sample(batch_size=1000, rollout_size=5)
+        sample = buffer.sample(batch_size=1000, rollout_len=5)
         for field in self.struct.names:
             self.assertTrue(np.all(sample[field] == -1))
 
@@ -136,7 +136,7 @@ class TestBuffer(unittest.TestCase):
                          "termination": np.ones((2, 1)),
                          })
 
-        sample = buffer.sample(batch_size=1000, rollout_size=20)
+        sample = buffer.sample(batch_size=1000, rollout_len=20)
         self.assertTrue(np.all(
             sample["reward"] - sample["reward"][:, 0].reshape(-1, 1, 1) ==
             np.arange(20).reshape(1, -1, 1)))
@@ -150,10 +150,10 @@ class TestBuffer(unittest.TestCase):
                          "reward": np.ones((2, 1)) * index,
                          "termination": np.ones((2, 1)),
                          })
-        sample = buffer.sample(batch_size=1000, rollout_size=10, sampling_length=20)
+        sample = buffer.sample(batch_size=1000, rollout_len=10, sampling_length=20)
         self.assertTrue(np.all(sample["reward"] >= 75 - 20))
 
-        sample = buffer.sample(batch_size=1000, rollout_size=5, sampling_length=5)
+        sample = buffer.sample(batch_size=1000, rollout_len=5, sampling_length=5)
         self.assertTrue(np.all(sample["reward"] - 70 == np.arange(5).reshape(1, -1, 1)))
 
 

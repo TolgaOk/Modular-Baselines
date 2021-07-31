@@ -4,13 +4,14 @@ import numpy as np
 import os
 import json
 from collections import defaultdict
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from stable_baselines3.common import logger
-from stable_baselines3.common.utils import safe_mean, configure_logger
+from stable_baselines3.common.logger import Logger
+from stable_baselines3.common.utils import safe_mean
 
-from modular_baselines.algorithms.callbacks import BaseAlgorithmCallback
-from modular_baselines.collectors.callbacks import BaseCollectorCallback
+from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
+from modular_baselines.collectors.collector import BaseCollectorCallback
 
 
 class InitLogCallback(BaseAlgorithmCallback):
@@ -25,31 +26,32 @@ class InitLogCallback(BaseAlgorithmCallback):
             any. Defaults to None.
     """
 
-    def __init__(self, log_interval: int, save_dir: str = None):
+    def __init__(self, logger: Logger, log_interval: int):
         self.log_interval = log_interval
-        logger.configure(folder=save_dir)
+        self.logger = logger
+        self.start_time = None
 
-    def _on_training_start(self, *args) -> None:
+    def on_training_start(self, *args) -> None:
         self.start_time = time.time()
 
-    def _on_step(self, locals_) -> bool:
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
         if locals_["iteration"] % self.log_interval == 0:
             fps = int(locals_["num_timesteps"] /
                       (time.time() - self.start_time))
-            logger.record("time/iterations",
-                          locals_["iteration"],
-                          exclude="tensorboard")
-            logger.record("time/fps",
-                          fps)
-            logger.record("time/time_elapsed",
-                          int(time.time() - self.start_time),
-                          exclude="tensorboard")
-            logger.record("time/total_timesteps",
-                          locals_["num_timesteps"],
-                          exclude="tensorboard")
-            logger.dump(step=locals_["num_timesteps"])
+            self.logger.record("time/iterations",
+                               locals_["iteration"],
+                               exclude="tensorboard")
+            self.logger.record("time/fps",
+                               fps)
+            self.logger.record("time/time_elapsed",
+                               int(time.time() - self.start_time),
+                               exclude="tensorboard")
+            self.logger.record("time/total_timesteps",
+                               locals_["num_timesteps"],
+                               exclude="tensorboard")
+            self.logger.dump(step=locals_["num_timesteps"])
 
-    def _on_training_end(self, *args) -> None:
+    def on_training_end(self, *args) -> None:
         pass
 
 
@@ -58,18 +60,19 @@ class LogRolloutCallback(BaseCollectorCallback):
     by the collector. At the end of a rollout, record the average values. 
     """
 
-    def __init__(self):
+    def __init__(self, logger: Logger):
         super().__init__()
         self.reset_info()
+        self.logger = logger
 
     def reset_info(self):
         self.ep_info_buffer = deque(maxlen=100)
         self.ep_success_buffer = deque(maxlen=100)
 
-    def _on_rollout_start(self, *args) -> None:
+    def on_rollout_start(self, *args) -> None:
         pass
 
-    def _on_rollout_step(self, locals_) -> None:
+    def on_rollout_step(self, locals_: Dict[str, Any]) -> None:
         dones = locals_["dones"]
         infos = locals_["infos"]
 
@@ -83,20 +86,38 @@ class LogRolloutCallback(BaseCollectorCallback):
             if maybe_is_success is not None and dones[idx]:
                 self.ep_success_buffer.append(maybe_is_success)
 
-    def _on_rollout_end(self, locals_) -> None:
+    def on_rollout_end(self, locals_: Dict[str, Any]) -> None:
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
-            logger.record_mean(
+            self.logger.record_mean(
                 "rollout/ep_rew_mean",
                 safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
-            logger.record_mean(
+            self.logger.record_mean(
                 "rollout/ep_len_mean",
                 safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
         self.reset_info()
 
 
-class LogParamCallback(BaseAlgorithmCallback):
+class LogLossCallback(BaseAlgorithmCallback):
+
+    def __init__(self, logger: Logger) -> None:
+        super().__init__()
+        self.logger = logger
+
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
+        for name, loss in locals_["loss_dict"].items():
+            self.logger.record_mean("train/{}".format(name), loss)
+
+    def on_training_start(self, *args) -> None:
+        pass
+
+    def on_training_end(self, *args) -> None:
+        pass
+
+
+class LogParamCallback(BaseAlgorithmCallback, ABC):
 
     def __init__(self,
+                 log_dir: str,
                  file_name: str,
                  log_interval: int = 100,
                  n_bins: int = 20):
@@ -106,17 +127,17 @@ class LogParamCallback(BaseAlgorithmCallback):
         self.n_bins = n_bins
         self._reset_buffer()
 
-        self.dir = os.path.join(logger.get_dir(), "hist")
+        self.dir = os.path.join(log_dir, "hist")
         self.path = os.path.join(self.dir, self.file_name)
         if os.path.exists(self.path):
             raise FileExistsError(
                 "File at {} already exists".format(self.path))
         os.makedirs(self.dir, exist_ok=True)
 
-    def _on_training_start(self, *args) -> None:
+    def on_training_start(self, *args) -> None:
         pass
 
-    def _on_step(self, locals_) -> bool:
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
         policy = locals_["self"].policy
         iteration = locals_["iteration"]
 
@@ -137,23 +158,24 @@ class LogParamCallback(BaseAlgorithmCallback):
                 jsonfile.write(jsonstr + "\n")
             self._reset_buffer()
 
+    @abstractmethod
     def _param(self, weight):
         raise NotImplementedError
 
     def _reset_buffer(self):
         self.histogram_buffer = defaultdict(list)
 
-    def _on_training_end(self, *args) -> None:
+    def on_training_end(self, *args) -> None:
         pass
 
 
-class LogGradCallback(LogParamCallback):
+class TorchLogGradCallback(LogParamCallback):
 
     def _param(self, weight):
         return weight.grad
 
 
-class LogWeightCallback(LogParamCallback):
+class TorchLogWeightCallback(LogParamCallback):
 
     def _param(self, weight):
         return weight
@@ -161,17 +183,21 @@ class LogWeightCallback(LogParamCallback):
 
 class LogHyperparameters(BaseAlgorithmCallback):
 
-    def __init__(self, hyperparameters, file_name="hyperparameters.json"):
+    def __init__(self,
+                 log_dir: str,
+                 hyperparameters: Dict[str, Any],
+                 file_name: str = "hyperparameters.json"):
         self.file_name = file_name
+        self.log_dir = log_dir
         self.hyperparameters = hyperparameters
 
-    def _on_training_start(self, *args) -> None:
-        path = os.path.join(logger.get_dir(), self.file_name)
+    def on_training_start(self, *args) -> None:
+        path = os.path.join(self.log_dir, self.file_name)
         with open(path, "w") as fobj:
             json.dump(self.hyperparameters, fobj)
 
-    def _on_training_end(self, *args) -> None:
+    def on_training_end(self, *args) -> None:
         pass
 
-    def _on_step(self, *args) -> None:
+    def on_step(self, *args) -> None:
         pass

@@ -102,14 +102,14 @@ class Buffer():
 
     def sample(self,
                batch_size: int,
-               rollout_size: int,
+               rollout_len: int,
                sampling_length: Optional[int] = None
                ) -> np.ndarray:
         """ Sample a random rollout from the buffer.
 
         Args:
             batch_size (int): Number of rollouts each having rollout_len size
-            rollout_size (int): Size of the rollout (sequence)
+            rollout_len (int): Size of the rollout (sequence)
             sampling_length (Optional[int]): Length of the sampling range. If left
                 None, all the capacity of the buffer is used for sampling.
 
@@ -119,14 +119,14 @@ class Buffer():
         buffer_size = self.size
         sampling_length = sampling_length or buffer_size
         assert sampling_length > 0, "Non-positive sampling length"
-        assert sampling_length >= rollout_size, "Sampling length is not big enough"
+        assert sampling_length >= rollout_len, "Sampling length is not big enough"
         assert sampling_length <= buffer_size, "Sampling length cannot exceed buffer size"
         time_indices = (np.random.randint(
             low=buffer_size - sampling_length,
-            high=buffer_size - rollout_size + 1,
+            high=buffer_size - rollout_len + 1,
             size=batch_size) - self._write_index) % buffer_size
         time_indices = (time_indices.reshape(-1, 1) +
-                        np.arange(rollout_size).reshape(1, -1)) % buffer_size
+                        np.arange(rollout_len).reshape(1, -1)) % buffer_size
         env_indices = np.arange(batch_size).reshape(-1, 1) % self.num_envs
 
         sample = self.buffer[time_indices, env_indices]

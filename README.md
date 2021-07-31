@@ -4,8 +4,8 @@ Modular-Baselines is a Reinforcement Learning (RL) library, based on [Stable-Bas
 
 | Agent | Framework |
 |:-----:|:---------:|
-|  A2C  |<img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px height = 40px alt="logo"></img> <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img>|
-|       |           | 
+|  A2C  |<img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px alt="logo"></img> <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img>|
+
 
 
 

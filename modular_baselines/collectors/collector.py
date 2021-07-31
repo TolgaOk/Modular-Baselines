@@ -1,7 +1,8 @@
-import torch
+import re
 import numpy as np
+from gym.spaces import Discrete
 
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import List, Optional, Union
 from abc import ABC, abstractmethod
 
 from stable_baselines3.common.vec_env import VecEnv
@@ -52,7 +53,7 @@ class RolloutCollector(BaseCollector):
     """
 
     _fields = ("observation", "next_observation", "reward",
-               "termination", "action", "policy_state")
+               "termination", "action")
 
     def __init__(self,
                  env: VecEnv,
@@ -95,12 +96,13 @@ class RolloutCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, policy_state, policy_context = self.policy.action_sample(
+            actions, policy_state, policy_context = self.policy.sample_action(
                 self._last_obs, self._last_policy_state)
-            new_obs, rewards, dones, infos = self.env.step(actions)
+            
+            new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
             # Terminated new_obs is different than next_obs
-            terminated_indexes = np.argwhere(dones == 1).flatten()
+            terminated_indexes = np.argwhere(dones.flatten() == 1).flatten()
             if len(terminated_indexes) > 0:
                 next_obs = new_obs.copy()
                 for index in terminated_indexes:
@@ -130,3 +132,11 @@ class RolloutCollector(BaseCollector):
             callback.on_rollout_end(locals())
 
         return self.num_timesteps
+
+    def environment_step(self, action):
+        if isinstance(self.env.action_space, Discrete):
+            action = action.reshape(-1)
+        observation, rewards, dones, infos = self.env.step(action)
+        rewards = rewards.reshape(-1, 1)
+        dones = dones.reshape(-1, 1)
+        return observation, rewards, dones, infos

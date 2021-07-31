@@ -60,7 +60,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self.rollout_len = rollout_len
 
         self.buffer = self.collector.buffer
-        self.num_env = self.collector.env.num_env
+        self.num_envs = self.collector.env.num_envs
 
         if not isinstance(callbacks, (list, tuple)):
             callbacks = [callbacks] if callbacks is not None else []
@@ -79,15 +79,13 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         for callback in self.callbacks:
             callback.on_training_start(locals())
 
-        # Start one step ahead so that next-values are calculated
-        self.collector.collect(1)
         while num_timesteps < total_timesteps:
 
             num_timesteps = self.collector.collect(self.rollout_len)
             loss_dict = self.train()
+            iteration += 1
             for callback in self.callbacks:
                 callback.on_step(locals())
-            iteration += 1
 
         for callback in self.callbacks:
             callback.on_training_end(locals())
