@@ -72,7 +72,8 @@ class A2C(OnPolicyAlgorithm):
             Dict[str, float]: Dictionary of losses to log
         """
         sample = self.buffer.sample(batch_size=self.num_envs,
-                                    rollout_len=self.rollout_len)
+                                    rollout_len=self.rollout_len,
+                                    sampling_length=self.rollout_len)
         return self.policy.update_parameters(
             sample,
             value_coef=self.value_coef,
