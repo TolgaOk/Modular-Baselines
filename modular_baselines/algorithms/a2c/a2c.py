@@ -130,18 +130,21 @@ class A2C(OnPolicyAlgorithm):
 
         if not isinstance(observation_space, spaces.Box):
             raise NotImplementedError("Only Box observations are available")
-        if not isinstance(action_space, spaces.Discrete):
-            raise NotImplementedError("Only Discrete actions are available")
+        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
+            raise NotImplementedError("Only Discrete and Box actions are available")
         policy_states_dtype = []
         # Check for reccurent policy
         policy_state = policy.init_state()
         if policy_state is not None:
             policy_states_dtype = [("policy_state", np.float32, policy_state.shape)]
+        action_dim = 1
+        if isinstance(action_dim, spaces.Box):
+            action_dim = action_space.shape[-1]
 
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
-            ("action", np.int32, (1,)),
+            ("action", np.int32, (action_dim,)),
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             *policy_states_dtype

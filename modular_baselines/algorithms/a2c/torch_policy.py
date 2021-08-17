@@ -45,6 +45,9 @@ class TorchA2CPolicy(A2CPolicy):
         """
         pass
 
+    def maybe_to_torch(self, ndarray: np.ndarray):
+        return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
+
     def update_parameters(self,
                           sample: np.ndarray,
                           value_coef: float,
@@ -57,24 +60,23 @@ class TorchA2CPolicy(A2CPolicy):
         batch_size, rollout_size = sample.shape
         policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
         values, log_probs, entropies, last_value = self.evaluate_rollout(
-            *map(lambda array: torch.from_numpy(array).to(self.device)
-                 if array is not None else None,
+            *map(self.maybe_to_torch,
                  (sample["observation"],
                   policy_state,
                   sample["action"],
                   sample["next_observation"][:, -1]))
         )
 
-        advantages, returns = calculate_gae(
-            rewards=sample["reward"],
-            terminations=sample["termination"],
-            values=values.detach().cpu().numpy(),
-            last_value=last_value.detach().cpu().numpy(),
-            gamma=gamma,
-            gae_lambda=gae_lambda)
-
-        advantages = torch.from_numpy(advantages).to(self.device)
-        returns = torch.from_numpy(returns).to(self.device)
+        advantages, returns = map(
+            self.maybe_to_torch,
+            calculate_gae(
+                rewards=sample["reward"],
+                terminations=sample["termination"],
+                values=values.detach().cpu().numpy(),
+                last_value=last_value.detach().cpu().numpy(),
+                gamma=gamma,
+                gae_lambda=gae_lambda)
+        )
 
         values, advantages, returns, log_probs, entropies = map(
             lambda tensor: tensor.reshape(batch_size * rollout_size, 1),
