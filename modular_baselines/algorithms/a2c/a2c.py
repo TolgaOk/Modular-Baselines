@@ -14,17 +14,23 @@ class A2CPolicy(BasePolicy):
     """ Base A2C class for different frameworks """
 
     @abstractmethod
-    def update_parameters(self, sample: np.ndarray) -> Dict[str, float]:
+    def update_parameters(self,
+                          sample: np.ndarray,
+                          value_coef: float,
+                          ent_coef: float,
+                          gamma: float,
+                          gae_lambda: float,
+                          max_grad_norm: float,
+                          ) -> Dict[str, float]:
         """ Update policy parameters using the given sample and a2c update mechanism.
 
-        Args:
-            sample (np.ndarray): Sample that contains at least observation, next_observation,
-                reward, termination, action, and policy_state if the policy is a reccurent policy.
+            Args:
+                sample (np.ndarray): Sample that contains at least observation, next_observation,
+                    reward, termination, action, and policy_state if the policy is a reccurent policy.
 
-        Returns:
-            Dict[str, float]: Dictionary of losses to log
-        """
-        pass
+            Returns:
+                Dict[str, float]: Dictionary of losses to log
+            """
 
 
 class A2C(OnPolicyAlgorithm):
@@ -71,6 +77,7 @@ class A2C(OnPolicyAlgorithm):
         Returns:
             Dict[str, float]: Dictionary of losses to log
         """
+        self.policy.train()
         sample = self.buffer.sample(batch_size=self.num_envs,
                                     rollout_len=self.rollout_len,
                                     sampling_length=self.rollout_len)
@@ -94,7 +101,7 @@ class A2C(OnPolicyAlgorithm):
               buffer_callbacks: Optional[Union[List[BaseBufferCallback],
                                                BaseBufferCallback]] = None,
               collector_callbacks: Optional[Union[List[BaseCollectorCallback],
-                                                 BaseCollectorCallback]] = None,
+                                                  BaseCollectorCallback]] = None,
               algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                                   BaseAlgorithmCallback]] = None,
               ) -> "A2C":
@@ -137,14 +144,12 @@ class A2C(OnPolicyAlgorithm):
         policy_state = policy.init_state()
         if policy_state is not None:
             policy_states_dtype = [("policy_state", np.float32, policy_state.shape)]
-        action_dim = 1
-        if isinstance(action_dim, spaces.Box):
-            action_dim = action_space.shape[-1]
+        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
 
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
-            ("action", np.int32, (action_dim,)),
+            ("action", action_space.dtype, (action_dim,)),
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             *policy_states_dtype

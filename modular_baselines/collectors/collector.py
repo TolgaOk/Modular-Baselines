@@ -1,6 +1,6 @@
 import re
 import numpy as np
-from gym.spaces import Discrete
+from gym.spaces import Discrete, Box
 
 from typing import List, Optional, Union
 from abc import ABC, abstractmethod
@@ -136,6 +136,8 @@ class RolloutCollector(BaseCollector):
     def environment_step(self, action):
         if isinstance(self.env.action_space, Discrete):
             action = action.reshape(-1)
+        if isinstance(self.env.action_space, Box):
+            action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         observation, rewards, dones, infos = self.env.step(action)
         rewards = rewards.reshape(-1, 1)
         dones = dones.reshape(-1, 1)
