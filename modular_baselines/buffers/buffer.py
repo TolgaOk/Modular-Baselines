@@ -119,15 +119,17 @@ class Buffer():
         buffer_size = self.size
         sampling_length = sampling_length or buffer_size
         assert sampling_length > 0, "Non-positive sampling length"
-        assert sampling_length >= rollout_len, "Sampling length is not big enough"
-        assert sampling_length <= buffer_size, "Sampling length cannot exceed buffer size"
-        time_indices = (np.random.randint(
-            low=buffer_size - sampling_length,
-            high=buffer_size - rollout_len + 1,
-            size=batch_size) - self._write_index) % buffer_size
+        assert sampling_length >= rollout_len, "Sampling length must be larger than rollout size"
+        assert sampling_length <= self.capacity, "Sampling length cannot exceed the capacity"
+        sampling_length = min(sampling_length, buffer_size) - rollout_len
+        high = self._write_index - rollout_len
+        low = high - sampling_length
+        time_indices = np.random.randint(low=low, high=high + 1, size=batch_size) % buffer_size
+        # print(time_indices)
         time_indices = (time_indices.reshape(-1, 1) +
                         np.arange(rollout_len).reshape(1, -1)) % buffer_size
         env_indices = np.arange(batch_size).reshape(-1, 1) % self.num_envs
+        # print(time_indices)
 
         sample = self.buffer[time_indices, env_indices]
 

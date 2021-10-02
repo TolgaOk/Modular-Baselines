@@ -87,7 +87,7 @@ class TestBuffer(unittest.TestCase):
                           buffer.sample,
                           batch_size=1000,
                           rollout_len=5,
-                          sampling_length=26)
+                          sampling_length=51)
         self.assertRaises(AssertionError,
                           buffer.sample,
                           batch_size=1000,
@@ -155,6 +155,16 @@ class TestBuffer(unittest.TestCase):
 
         sample = buffer.sample(batch_size=1000, rollout_len=5, sampling_length=5)
         self.assertTrue(np.all(sample["reward"] - 70 == np.arange(5).reshape(1, -1, 1)))
+
+    def test_sample_after_full(self):
+        struct = np.dtype([("array", np.int32, (1,))])
+        buffer = Buffer(struct=struct, capacity=20, num_envs=2)
+        for index in range(25):
+            buffer.push({"array": np.arange(index, index+2).reshape(2, 1)})
+        self.assertTrue(np.all(
+            buffer.sample(batch_size=2, rollout_len=5, sampling_length=5)["array"] ==
+            np.expand_dims(np.stack([np.arange(20, 25), np.arange(21, 26)], axis=0), axis=-1)
+        ))
 
 
 if __name__ == '__main__':
