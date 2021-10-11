@@ -1,5 +1,6 @@
 from typing import List, Optional, Union, Dict
 from abc import abstractmethod
+import os
 from gym import spaces
 import numpy as np
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
@@ -88,6 +89,9 @@ class A2C(OnPolicyAlgorithm):
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
             max_grad_norm=self.max_grad_norm)
+
+    def save(self, path: str) -> None:
+        self.policy.save(os.path.join(path, "policy_params.b"))
 
     @staticmethod
     def setup(env: VecEnv,
