@@ -1,180 +1,150 @@
-import torch
 import numpy as np
-from typing import Dict, Generator, Optional, Union
-import gym
+from typing import Dict, List, Optional, Union
+import psutil
 import warnings
-
-from stable_baselines3.common.buffers import ReplayBuffer, BaseBuffer
-from stable_baselines3.common.buffers import RolloutBuffer
-from stable_baselines3.common.type_aliases import ReplayBufferSamples, RolloutBufferSamples
-from stable_baselines3.common.vec_env import VecNormalize
+from abc import ABC, abstractmethod
 
 
-try:
-    # Check memory used by replay buffer when possible
-    import psutil
-except ImportError:
-    psutil = None
+class BaseBufferCallback(ABC):
+    """ Base class for buffer callbacks that only supports:
+        on_buffer_push, on_buffer_sample, and on_buffer_init calls.
+    """
+
+    @abstractmethod
+    def on_buffer_push(self) -> None:
+        pass
+
+    @abstractmethod
+    def on_buffer_sample(self) -> None:
+        pass
+
+    @abstractmethod
+    def on_buffer_init(self) -> None:
+        pass
 
 
-class GeneralBuffer(ReplayBuffer):
-    """ Buffer that combines ReplayBuffer and Rollout buffer.
+class BaseBuffer(ABC):
 
-    Method:
-        get_rollout: Sample the last experiences from the buffer.
-        sample: Uniform sampling from the buffer
+    @abstractmethod
+    def push(self):
+        pass
 
+    @abstractmethod
+    def sample(self):
+        pass
+
+
+class Buffer():
+    """ Standard buffer for both on-policy and off-policy agents.
+
+    Implements a queue structure with a finite capacity. When the buffer is full it overwrites the
+    values. Each item in the buffer is a Struct-Array of the given struct type.
+
+        Args:
+            struct (np.dtype): Array dtype of a single item
+            capacity (int): Maximum size of the buffer
+            num_envs (int): Number of parallel enviornments
+            callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]]): Callbacks
     """
 
     def __init__(self,
-                 buffer_size: int,
-                 observation_space: gym.spaces.Space,
-                 action_space: gym.spaces.Space,
-                 device: Union[torch.device, str] = "cpu",
-                 n_envs: int = 1,
-                 optimize_memory_usage: bool = False,
-                 ):
-        """ This function is only overwritten to remove assertion for n_envs > 1.
-        """
-        BaseBuffer.__init__(self,
-                            buffer_size,
-                            observation_space,
-                            action_space,
-                            device,
-                            n_envs=n_envs)
-        # Check that the replay buffer can fit into the memory
-        if psutil is not None:
-            mem_available = psutil.virtual_memory().available
+                 struct: np.dtype,
+                 capacity: int,
+                 num_envs: int,
+                 callbacks: Optional[Union[List[BaseBufferCallback], BaseBufferCallback]] = None
+                 ) -> None:
+        self.struct = struct
+        self.capacity = capacity
+        self.num_envs = num_envs
+        if not isinstance(callbacks, (list, tuple)):
+            callbacks = [callbacks] if callbacks is not None else []
+        self.callbacks = callbacks
 
-        self.optimize_memory_usage = optimize_memory_usage
-        self.observations = np.zeros(
-            (self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
-        if optimize_memory_usage:
-            # `observations` contains also the next observation
-            self.next_observations = None
-        else:
-            self.next_observations = np.zeros(
-                (self.buffer_size, self.n_envs) + self.obs_shape,
-                dtype=observation_space.dtype)
-        self.actions = np.zeros(
-            (self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
-        self.rewards = np.zeros(
-            (self.buffer_size, self.n_envs), dtype=np.float32)
-        self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        available_memory = psutil.virtual_memory().available
+        required_memory = struct.itemsize * capacity * num_envs
+        if available_memory < required_memory:
+            warnings.warn("Required memory {}GB is larger than the available memory {}GB".format(
+                required_memory // 2**30, available_memory // 2**30
+            ))
 
-        # Rollout based memory
-        self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
-        self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
-        self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
-        self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.buffer = np.zeros(shape=(capacity, num_envs), dtype=struct)
+        self._write_index = 0
+        self.full = False
 
-        if psutil is not None:
-            total_memory_usage = self.observations.nbytes + \
-                self.actions.nbytes + self.rewards.nbytes + self.dones.nbytes
-            if self.next_observations is not None:
-                total_memory_usage += self.next_observations.nbytes
+        for callback in self.callbacks:
+            callback.on_initialization(locals())
 
-            if total_memory_usage > mem_available:
-                # Convert to GB
-                total_memory_usage /= 1e9
-                mem_available /= 1e9
-                warnings.warn(
-                    "This system does not have apparently enough memory to store the complete "
-                    f"replay buffer {total_memory_usage:.2f}GB > {mem_available:.2f}GB")
+    @property
+    def size(self) -> int:
+        return self.capacity if self.full else self._write_index
 
-    def add(self,
-            obs: np.ndarray,
-            next_obs: np.ndarray,
-            action: np.ndarray,
-            reward: np.ndarray,
-            done: np.ndarray,
-            value: torch.Tensor,
-            log_prob: torch.Tensor):
-        self.values[self.pos] = value.clone().cpu().numpy().flatten()
-        self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
-        super().add(obs, next_obs, action, reward, done)
-
-    def _get_samples(self,
-                     batch_inds: np.ndarray,
-                     env: Optional[VecNormalize] = None
-                     ) -> ReplayBufferSamples:
-        env_indices = np.random.randint(0, self.n_envs, len(batch_inds))
-        if self.optimize_memory_usage:
-            next_obs = self._normalize_obs(
-                self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :], env)
-        else:
-            next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
-
-        data = (
-            self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
-            self.actions[batch_inds, env_indices, :],
-            next_obs,
-            self.dones[batch_inds, env_indices],
-            self._normalize_reward(self.rewards[batch_inds, env_indices], env),
-        )
-        return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
-
-    def get_rollout(self,
-                    rollout_size: int,
-                    batch_size: Optional[int] = None
-                    ) -> Generator[RolloutBufferSamples, None, None]:
-        """Sample the latest experiences to form a Rollout.
+    def push(self, item: Dict[str, np.ndarray]) -> None:
+        """ Add an item to the buffer.
 
         Args:
-            rollout_size (int): Horizon of the rollout
+            item (Dict[str, np.ndarray]): Item dictionary that is expected to have the same
+                structure with the buffer dtype
+        """
+        for name in self.struct.names:
+            assert name in item.keys(), "Field name {} is missing".format(name)
+            expected_shape = (self.num_envs, *self.struct[name].shape)
+            array = item[name]
+            assert array.shape == expected_shape, (
+                "Invalid shape for {}, expected shape: {}, given shape: {}").format(
+                    name, expected_shape, array.shape)
+            self.buffer[self._write_index][name] = array
+
+        for callback in self.callbacks:
+            callback.on_push(locals())
+
+        self._write_index = (self._write_index + 1) % self.capacity
+        self.full = self.full or self._write_index == 0
+
+    def sample(self,
+               batch_size: int,
+               rollout_len: int,
+               sampling_length: Optional[int] = None
+               ) -> np.ndarray:
+        """ Sample a random rollout from the buffer.
+
+        Args:
+            batch_size (int): Number of rollouts each having rollout_len size
+            rollout_len (int): Size of the rollout (sequence)
+            sampling_length (Optional[int]): Length of the sampling range. If left
+                None, all the capacity of the buffer is used for sampling.
 
         Returns:
-            ReplayBufferSamples: Replay Buffer structure
+            np.ndarray: Sampled array of the buffer dtype
         """
-        assert (self.size() >= rollout_size), ""
-        assert (self.buffer_size > rollout_size), "Buffer size must be larger than the rollout_size"
-        pos_indices = np.arange(-rollout_size, 0) + self.pos - 1
-        rollout = {}
-        for tensor_name in ["observations", "actions", "values", "log_probs",
-                            "advantages", "returns"]:
-            rollout[tensor_name] = getattr(self, tensor_name)[pos_indices]
+        buffer_size = self.size
+        sampling_length = sampling_length or buffer_size
+        assert sampling_length > 0, "Non-positive sampling length"
+        assert sampling_length >= rollout_len, "Sampling length must be larger than rollout size"
+        assert sampling_length <= self.capacity, "Sampling length cannot exceed the capacity"
+        sampling_length = min(sampling_length, buffer_size) - rollout_len
+        high = self._write_index - rollout_len
+        low = high - sampling_length
+        time_indices = np.random.randint(low=low, high=high + 1, size=batch_size) % buffer_size
+        # print(time_indices)
+        time_indices = (time_indices.reshape(-1, 1) +
+                        np.arange(rollout_len).reshape(1, -1)) % buffer_size
+        env_indices = np.arange(batch_size).reshape(-1, 1) % self.num_envs
+        # print(time_indices)
 
-        if batch_size is None:
-            batch_size = rollout_size * self.n_envs
+        sample = self.buffer[time_indices, env_indices]
 
-        start_idx = 0
-        batch_indices = np.random.permutation(rollout_size * self.n_envs)
-        while start_idx < rollout_size * self.n_envs:
-            indices = batch_indices[start_idx: start_idx + batch_size]
-            yield self._get_rollout_samples(
-                pos_indices[indices // self.n_envs], indices % self.n_envs)
-            start_idx += batch_size
+        for callback in self.callbacks:
+            callback.on_sample(locals())
 
-    def _get_rollout_samples(self,
-                             pos_indices: np.ndarray,
-                             env_indices: np.ndarray,
-                             env: Optional[VecNormalize] = None
-                             ) -> RolloutBufferSamples:
-        data = (
-            self.observations[pos_indices, env_indices],
-            self.actions[pos_indices, env_indices],
-            self.values[pos_indices, env_indices].flatten(),
-            self.log_probs[pos_indices, env_indices].flatten(),
-            self.advantages[pos_indices, env_indices].flatten(),
-            self.returns[pos_indices, env_indices].flatten(),
-        )
-        return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
+        return self.postprocess_sample(sample)
 
-    def compute_returns_and_advantage(self,
-                                      rollout_size: int,
-                                      gamma: float,
-                                      gae_lambda: Optional[float] = 1.0
-                                      ) -> None:
-        assert self.size() > rollout_size, (
-            ("Buffer size {} must be at least 1 larger"
-             " than the rollout size {}").format(self.size(), rollout_size))
-        steps = np.arange(-rollout_size, 0) + self.pos - 1
+    def postprocess_sample(self, sample: np.ndarray) -> np.ndarray:
+        """ Transform the sample array.
 
-        td_array = (self.values[steps + 1] * gamma * (1 - self.dones[steps])
-                    + self.rewards[steps] - self.values[steps])
-        advantage = 0
-        for index in reversed(range(rollout_size)):
-            advantage = td_array[index] + advantage * gamma * \
-                gae_lambda * (1 - self.dones[steps[index]])
-            self.advantages[steps[index]] = advantage
-            self.returns[steps[index]] = advantage + self.values[steps[index]]
+        Args:
+            sample (np.ndarray): Initial sample of the buffer dtype
+
+        Returns:
+            np.ndarray: Transformed sample of the buffer dtype
+        """
+        return sample

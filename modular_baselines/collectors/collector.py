@@ -1,25 +1,44 @@
-import torch
+import re
 import numpy as np
-from gym.spaces import Discrete
-from typing import List, Tuple
+from gym.spaces import Discrete, Box
+
+from typing import List, Optional, Union
 from abc import ABC, abstractmethod
 
 from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.buffers import BaseBuffer
 
-from modular_baselines.collectors.callbacks import BaseCollectorCallback
+from modular_baselines.buffers.buffer import BaseBuffer
+from modular_baselines.policies.policy import BasePolicy
+
+
+class BaseCollectorCallback(ABC):
+    """ Base class for buffer callbacks that only supports:
+    on_rollout_start, on_rollout_step, and on_rollout_end calls.
+    """
+
+    @abstractmethod
+    def on_rollout_start(self, *args) -> None:
+        pass
+
+    @abstractmethod
+    def on_rollout_step(self, *args) -> None:
+        pass
+
+    @abstractmethod
+    def on_rollout_end(self, *args) -> None:
+        pass
 
 
 class BaseCollector(ABC):
     """ Base abstract class for collectors """
 
     @abstractmethod
-    def collect(self) -> None:
+    def collect(self, n_rollout_steps: int) -> int:
         pass
 
 
-class BaseOnPolicyCollector(BaseCollector):
-    """ Base On policy collector class. Collects a rollout with every collect
+class RolloutCollector(BaseCollector):
+    """ Collects a rollout with every collect
     call and add the experience into the buffer.
 
     Args:
@@ -33,23 +52,31 @@ class BaseOnPolicyCollector(BaseCollector):
             to "cpu".
     """
 
+    _fields = ("observation", "next_observation", "reward",
+               "termination", "action")
+
     def __init__(self,
                  env: VecEnv,
                  buffer: BaseBuffer,
-                 policy: torch.nn.Module,
-                 callbacks: List[BaseCollectorCallback] = [],
-                 device: str = "cpu"):
+                 policy: BasePolicy,
+                 callbacks: Optional[Union[List[BaseCollectorCallback],
+                                           BaseCollectorCallback]] = None):
         super().__init__()
 
         self.env = env
-        self.device = device
         self.buffer = buffer
         self.policy = policy
 
-        self._last_obs = self.env.reset()
+        for field in self._fields:
+            assert field in buffer.struct.names, (
+                "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
+        self._last_policy_state = policy.init_state(batch_size=self.env.num_envs)
+        self._last_obs = self.env.reset()
 
+        if not isinstance(callbacks, (list, tuple)):
+            callbacks = [callbacks] if callbacks is not None else []
         self.callbacks = callbacks
 
     def collect(self, n_rollout_steps: int) -> int:
@@ -69,32 +96,34 @@ class BaseOnPolicyCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, *values_to_save = self.process_step()
-            new_obs, rewards, dones, infos = self.env.step(actions)
-
-            self.num_timesteps += self.env.num_envs
-            n_steps += 1
-
-            if isinstance(self.env.action_space, Discrete):
-                # Reshape in case of discrete action
-                actions = actions.reshape(-1, 1)
-
-            # Termination new_obs is different than next_obs
+            actions, policy_state, policy_context = self.policy.sample_action(
+                self._last_obs, self._last_policy_state)
+            
+            new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
-            terminated_indexes = np.argwhere(dones == 1).flatten()
+            # Terminated new_obs is different than next_obs
+            terminated_indexes = np.argwhere(dones.flatten() == 1).flatten()
             if len(terminated_indexes) > 0:
                 next_obs = new_obs.copy()
                 for index in terminated_indexes:
                     next_obs[index] = infos[index]["terminal_observation"]
 
-            self.buffer.add(self._last_obs,
-                            next_obs,
-                            actions,
-                            rewards,
-                            dones,
-                            *values_to_save)
+            self.num_timesteps += self.env.num_envs
+            n_steps += 1
+
+            if self._last_policy_state is not None:
+                policy_context["policy_state"] = self._last_policy_state
+            self.buffer.push({
+                "observation": self._last_obs,
+                "next_observation": next_obs,
+                "reward": rewards,
+                "termination": dones,
+                "action": actions,
+                **policy_context
+            })
 
             self._last_obs = new_obs
+            self._last_policy_state = policy_state
 
             for callback in self.callbacks:
                 callback.on_rollout_step(locals())
@@ -104,26 +133,12 @@ class BaseOnPolicyCollector(BaseCollector):
 
         return self.num_timesteps
 
-    @abstractmethod
-    def process_step(self):
-        pass
-
-
-class OnPolicyCollector(BaseOnPolicyCollector):
-    """ On Policy collector that is mainly used with value based PG algorithms
-    """
-
-    def process_step(self) -> Tuple[torch.Tensor]:
-        """ Sample actions, values and log probability of the actions using
-        the policy
-
-        Returns:
-            Tuple[torch.Tensor]: actions, values, and log probabilities tensors
-        """
-
-        with torch.no_grad():
-            # Convert to pytorch tensor
-            obs_tensor = torch.as_tensor(self._last_obs).to(self.device)
-            actions, values, log_probs = self.policy.forward(obs_tensor)
-        actions = actions.cpu().numpy()
-        return actions, values, log_probs
+    def environment_step(self, action):
+        if isinstance(self.env.action_space, Discrete):
+            action = action.reshape(-1)
+        if isinstance(self.env.action_space, Box):
+            action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        observation, rewards, dones, infos = self.env.step(action)
+        rewards = rewards.reshape(-1, 1)
+        dones = dones.reshape(-1, 1)
+        return observation, rewards, dones, infos
