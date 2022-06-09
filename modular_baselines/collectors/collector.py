@@ -113,6 +113,7 @@ class RolloutCollector(BaseCollector):
 
             if self._last_policy_state is not None:
                 policy_context["policy_state"] = self._last_policy_state
+                policy_context["next_policy_state"] = policy_state
             self.buffer.push({
                 "observation": self._last_obs,
                 "next_observation": next_obs,

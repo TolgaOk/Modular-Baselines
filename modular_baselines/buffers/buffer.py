@@ -125,11 +125,10 @@ class Buffer():
         high = self._write_index - rollout_len
         low = high - sampling_length
         time_indices = np.random.randint(low=low, high=high + 1, size=batch_size) % buffer_size
-        # print(time_indices)
+
         time_indices = (time_indices.reshape(-1, 1) +
                         np.arange(rollout_len).reshape(1, -1)) % buffer_size
         env_indices = np.arange(batch_size).reshape(-1, 1) % self.num_envs
-        # print(time_indices)
 
         sample = self.buffer[time_indices, env_indices]
 
