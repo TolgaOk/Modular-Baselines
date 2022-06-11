@@ -102,10 +102,6 @@ class TorchPPOPolicy(PPOPolicy):
             _slice = slice(index, index + batch_size)
             yield tuple([tensor[_slice] if tensor is not None else None for tensor in tensors])
 
-    def init_state(self, batch_size=None):
-        # Initialize Policy State. None for non-reccurent models
-        return None
-
     def update_parameters(self,
                           sample: np.ndarray,
                           value_coef: float,
