@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from stable_baselines3.common.vec_env import VecEnv
 
 from modular_baselines.buffers.buffer import BaseBuffer
-from modular_baselines.policies.policy import BasePolicy
+from modular_baselines.algorithms.policy import BasePolicy
 
 
 class BaseCollectorCallback(ABC):
