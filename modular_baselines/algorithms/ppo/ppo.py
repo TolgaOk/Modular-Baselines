@@ -8,7 +8,7 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
-from modular_baselines.policies.policy import BasePolicy
+from modular_baselines.algorithms.policy import BasePolicy
 from modular_baselines.algorithms.a2c.a2c import A2C
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 

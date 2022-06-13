@@ -3,7 +3,7 @@ from typing import List, Optional, Union
 
 
 from modular_baselines.collectors.collector import BaseCollector
-from modular_baselines.policies.policy import BasePolicy
+from modular_baselines.algorithms.policy import BasePolicy
 
 
 class BaseAlgorithmCallback(ABC):

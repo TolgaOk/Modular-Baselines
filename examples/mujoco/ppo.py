@@ -71,6 +71,10 @@ class Policy(torch.nn.Module, TorchPPOPolicy):
     def optimizer(self) -> torch.optim.Optimizer:
         return self._optimizer
 
+    def init_state(self, batch_size=None):
+        # Initialize Policy State. None for non-recurrent models
+        return None
+
 
 def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
     np.random.seed(seed)
@@ -131,4 +135,4 @@ ppo_mujoco_walker2d_hyperparameters = dict(
 
 
 if __name__ == "__main__":
-    agent = setup("Walker2d-v4", ppo_mujoco_walker2d_hyperparameters, seed=1001)
+    agent = setup("Walker2d-v4", ppo_mujoco_walker2d_hyperparameters, seed=1003)
