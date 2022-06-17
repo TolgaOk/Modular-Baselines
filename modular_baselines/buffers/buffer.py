@@ -4,6 +4,8 @@ import psutil
 import warnings
 from abc import ABC, abstractmethod
 
+from modular_baselines.loggers.data_logger import DataLogger
+
 
 class BaseBufferCallback(ABC):
     """ Base class for buffer callbacks that only supports:
@@ -43,7 +45,7 @@ class Buffer():
         Args:
             struct (np.dtype): Array dtype of a single item
             capacity (int): Maximum size of the buffer
-            num_envs (int): Number of parallel enviornments
+            num_envs (int): Number of parallel environments
             callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]]): Callbacks
     """
 
@@ -51,11 +53,15 @@ class Buffer():
                  struct: np.dtype,
                  capacity: int,
                  num_envs: int,
+                 logger: DataLogger,
                  callbacks: Optional[Union[List[BaseBufferCallback], BaseBufferCallback]] = None
                  ) -> None:
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
+        self.logger = logger
+        self._init_default_loggers()
+
         if not isinstance(callbacks, (list, tuple)):
             callbacks = [callbacks] if callbacks is not None else []
         self.callbacks = callbacks
@@ -147,3 +153,6 @@ class Buffer():
             np.ndarray: Transformed sample of the buffer dtype
         """
         return sample
+
+    def _init_default_loggers(self) -> None:
+        pass

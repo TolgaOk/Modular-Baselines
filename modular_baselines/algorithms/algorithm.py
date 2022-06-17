@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Union
-
+from time import time
+import numpy as np
 
 from modular_baselines.collectors.collector import BaseCollector
 from modular_baselines.algorithms.policy import BasePolicy
+from modular_baselines.loggers.data_logger import DataLogger, DataLog, ListLog
 
 
 class BaseAlgorithmCallback(ABC):
@@ -40,7 +42,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     """ Base on policy learning algorithm
 
     Args:
-        policy (torch.nn.Module): Poliicy module with both heads
+        policy (torch.nn.Module): Policy module with both heads
         buffer (BaseBuffer): Experience Buffer
         collector (BaseCollector): Experience collector
         env (VecEnv): Vectorized environment
@@ -53,11 +55,14 @@ class OnPolicyAlgorithm(BaseAlgorithm):
                  policy: BasePolicy,
                  collector: BaseCollector,
                  rollout_len: int,
+                 logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
         self.policy = policy
         self.collector = collector
         self.rollout_len = rollout_len
+        self.logger = logger
+        self._init_default_loggers()
 
         self.buffer = self.collector.buffer
         self.num_envs = self.collector.env.num_envs
@@ -73,17 +78,26 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             total_timesteps (int): Total environment timesteps to run
         """
 
+        train_start_time = time()
         num_timesteps = 0
         iteration = 0
 
         for callback in self.callbacks:
             callback.on_training_start(locals())
 
-        while num_timesteps < total_timesteps:
 
+        while num_timesteps < total_timesteps:
+            iteration_start_time = time()
+            
             num_timesteps = self.collector.collect(self.rollout_len)
             loss_dict = self.train()
             iteration += 1
+
+            self.logger.iteration.push(iteration)
+            self.logger.timesteps.push(num_timesteps)
+            self.logger.time_elapsed.push(time() - train_start_time)
+            self.logger.iteration_time.push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
+
             for callback in self.callbacks:
                 callback.on_step(locals())
 
@@ -91,3 +105,20 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             callback.on_training_end(locals())
 
         return None
+        
+    def _init_default_loggers(self) -> None:
+        loggers = dict(
+            iteration = DataLog(
+                formatting=lambda value: "iterations: {}".format(value)
+            ),
+            timesteps = DataLog(
+                formatting=lambda value: "total_timesteps: {}".format(value)
+            ),
+            time_elapsed = DataLog(
+                formatting=lambda value: "time_elapsed: {:.1f} s".format(value)
+            ),
+            iteration_time = ListLog(
+                formatting=lambda values: "fps: {}".format(int(1 / np.mean(values)))
+            ),
+        )
+        self.logger.add_if_not_exists(loggers)
