@@ -9,6 +9,7 @@ from modular_baselines.collectors.collector import RolloutCollector, BaseCollect
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.policy import BasePolicy
+from modular_baselines.loggers.data_logger import DataLogger, ListLog, DataLog
 
 
 class A2CPolicy(BasePolicy):
@@ -59,11 +60,13 @@ class A2C(OnPolicyAlgorithm):
                  gamma: float,
                  gae_lambda: float,
                  max_grad_norm: float,
+                 logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
         super().__init__(policy=policy,
                          collector=collector,
                          rollout_len=rollout_len,
+                         logger=logger,
                          callbacks=callbacks)
 
         self.gamma = gamma
@@ -145,7 +148,7 @@ class A2C(OnPolicyAlgorithm):
             raise NotImplementedError("Only Discrete and Box actions are available")
         policy_states_dtype = []
         # Check for reccurent policy
-        policy_state = policy.init_state()
+        policy_state = policy.init_hidden_state()
         if policy_state is not None:
             policy_states_dtype = [("policy_state", np.float32, policy_state.shape)]
         action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
@@ -158,7 +161,10 @@ class A2C(OnPolicyAlgorithm):
             ("termination", np.float32, (1,)),
             *policy_states_dtype
         ])
-        buffer = Buffer(struct, rollout_len, env.num_envs, buffer_callbacks)
-        collector = RolloutCollector(env, buffer, policy, collector_callbacks)
+
+        data_logger = DataLogger()
+        policy.set_logger(data_logger)
+        buffer = Buffer(struct, rollout_len, env.num_envs, data_logger, buffer_callbacks)
+        collector = RolloutCollector(env, buffer, policy, data_logger, collector_callbacks)
         return A2C(policy, collector, rollout_len, ent_coef, value_coef,
-                   gamma, gae_lambda, max_grad_norm, algorithm_callbacks)
+                   gamma, gae_lambda, max_grad_norm, data_logger, algorithm_callbacks)

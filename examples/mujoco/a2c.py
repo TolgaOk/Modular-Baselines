@@ -11,7 +11,8 @@ from stable_baselines3.common.logger import configure
 from modular_baselines.algorithms.a2c.torch_policy import TorchA2CPolicy
 from modular_baselines.networks.network import SharedFeatureNetwork
 from modular_baselines.algorithms.a2c.a2c import A2C
-from modular_baselines.loggers.basic import InitLogCallback, LogRolloutCallback, LogLossCallback
+from modular_baselines.loggers.data_logger import DataLogger
+from modular_baselines.loggers.basic import STDOUTLoggerCallback
 
 
 class Policy(SharedFeatureNetwork, TorchA2CPolicy):
@@ -24,7 +25,7 @@ class Policy(SharedFeatureNetwork, TorchA2CPolicy):
     def optimizer(self) -> torch.optim.Optimizer:
         return self._optimizer
 
-    def init_state(self, batch_size=None):
+    def init_hidden_state(self, batch_size=None):
         return None
 
 
@@ -56,10 +57,8 @@ def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
         gae_lambda=hyperparameters["gae_lambda"],
         max_grad_norm=hyperparameters["max_grad_norm"],
         buffer_callbacks=None,
-        collector_callbacks=LogRolloutCallback(logger),
-        algorithm_callbacks=[InitLogCallback(logger,
-                                             hyperparameters["log_interval"]),
-                             LogLossCallback(logger)])
+        collector_callbacks=None,
+        algorithm_callbacks=[STDOUTLoggerCallback(interval=hyperparameters["log_interval"])])
 
     agent.learn(total_timesteps=hyperparameters["total_timesteps"])
     return agent
