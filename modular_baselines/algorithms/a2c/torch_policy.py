@@ -7,6 +7,7 @@ from torch.types import Device
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.a2c.a2c import A2CPolicy
+from modular_baselines.loggers.data_logger import ListLog
 
 
 class TorchA2CPolicy(A2CPolicy):
@@ -109,6 +110,24 @@ class TorchA2CPolicy(A2CPolicy):
         torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
         self.optimizer.step()
 
+        self.logger.value_loss.push(value_loss.item())
+        self.logger.policy_loss.push(policy_loss.item())
+        self.logger.entropy_loss.push(entropy_loss.item())
+
         return dict(value_loss=value_loss.item(),
                     policy_loss=policy_loss.item(),
                     entropy_loss=entropy_loss.item())
+
+    def _init_default_loggers(self) -> None:
+        loggers = dict(
+            value_loss = ListLog(
+                formatting=lambda value: "value_loss: {:.3f}".format(np.mean(value))
+            ),
+            policy_loss = ListLog(
+                formatting=lambda value: "policy_loss: {:.3f}".format(np.mean(value))
+            ),
+            entropy_loss = ListLog(
+                formatting=lambda value: "entropy_loss: {:.3f}".format(np.mean(value))
+            ),
+        )
+        self.logger.add_if_not_exists(loggers)
