@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 import re
 import numpy as np
 from gym.spaces import Discrete, Box
@@ -8,7 +9,8 @@ from abc import ABC, abstractmethod
 from stable_baselines3.common.vec_env import VecEnv
 
 from modular_baselines.buffers.buffer import BaseBuffer
-from modular_baselines.policies.policy import BasePolicy
+from modular_baselines.algorithms.policy import BasePolicy
+from modular_baselines.loggers.data_logger import DataLogger, ListLog
 
 
 class BaseCollectorCallback(ABC):
@@ -59,6 +61,7 @@ class RolloutCollector(BaseCollector):
                  env: VecEnv,
                  buffer: BaseBuffer,
                  policy: BasePolicy,
+                 logger: DataLogger,
                  callbacks: Optional[Union[List[BaseCollectorCallback],
                                            BaseCollectorCallback]] = None):
         super().__init__()
@@ -66,18 +69,31 @@ class RolloutCollector(BaseCollector):
         self.env = env
         self.buffer = buffer
         self.policy = policy
+        self.logger = logger
+        self._init_default_loggers()
 
         for field in self._fields:
             assert field in buffer.struct.names, (
                 "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
-        self._last_policy_state = policy.init_state(batch_size=self.env.num_envs)
+        self._last_policy_state = policy.init_hidden_state(batch_size=self.env.num_envs)
         self._last_obs = self.env.reset()
 
         if not isinstance(callbacks, (list, tuple)):
             callbacks = [callbacks] if callbacks is not None else []
         self.callbacks = callbacks
+
+    def _init_default_loggers(self) -> None:
+        loggers = dict(
+            env_reward = ListLog(
+                formatting=lambda values: "ep_rew_mean: {:.1f}".format(np.mean(values))
+            ),
+            env_length = ListLog(
+                formatting=lambda values: "ep_len_mean: {:.1f}".format(np.mean(values))
+            )
+        )
+        self.logger.add_if_not_exists(loggers)
 
     def collect(self, n_rollout_steps: int) -> int:
         """ Collect a rollout of experience using the policy and load them to
@@ -113,6 +129,7 @@ class RolloutCollector(BaseCollector):
 
             if self._last_policy_state is not None:
                 policy_context["policy_state"] = self._last_policy_state
+                policy_context["next_policy_state"] = policy_state
             self.buffer.push({
                 "observation": self._last_obs,
                 "next_observation": next_obs,
@@ -121,6 +138,12 @@ class RolloutCollector(BaseCollector):
                 "action": actions,
                 **policy_context
             })
+
+            for idx, info in enumerate(infos):
+                maybe_ep_info = info.get("episode")
+                if maybe_ep_info is not None:
+                    self.logger.env_reward.push(maybe_ep_info["r"])
+                    self.logger.env_length.push(maybe_ep_info["l"])
 
             self._last_obs = new_obs
             self._last_policy_state = policy_state
