@@ -35,7 +35,7 @@ def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
     agent = TorchPPOAgent(policy, optimizer, vecenv.observation_space,
                           vecenv.action_space, data_logger)
 
-    agent = PPO.setup(
+    learner = PPO.setup(
         env=vecenv,
         agent=agent,
         data_logger=data_logger,
@@ -52,8 +52,8 @@ def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
         collector_callbacks=None,
         algorithm_callbacks=[STDOUTLoggerCallback(interval=hyperparameters["log_interval"])])
 
-    agent.learn(total_timesteps=hyperparameters["total_timesteps"])
-    return agent
+    learner.learn(total_timesteps=hyperparameters["total_timesteps"])
+    return learner
 
 
 ppo_mujoco_walker2d_hyperparameters = dict(
