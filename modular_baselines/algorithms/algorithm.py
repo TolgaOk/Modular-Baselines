@@ -3,8 +3,9 @@ from typing import List, Optional, Union
 from time import time
 import numpy as np
 
+from modular_baselines.component import Component
 from modular_baselines.collectors.collector import BaseCollector
-from modular_baselines.algorithms.policy import BasePolicy
+from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.loggers.data_logger import DataLogger, DataLog, ListLog
 
 
@@ -26,7 +27,7 @@ class BaseAlgorithmCallback(ABC):
         pass
 
 
-class BaseAlgorithm(ABC):
+class BaseAlgorithm(Component):
     """ Base abstract class for Algorithms """
 
     @abstractmethod
@@ -42,7 +43,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     """ Base on policy learning algorithm
 
     Args:
-        policy (torch.nn.Module): Policy module with both heads
+        agent (BaseAgent): Agent to be learned
         buffer (BaseBuffer): Experience Buffer
         collector (BaseCollector): Experience collector
         env (VecEnv): Vectorized environment
@@ -52,17 +53,16 @@ class OnPolicyAlgorithm(BaseAlgorithm):
     """
 
     def __init__(self,
-                 policy: BasePolicy,
+                 agent: BaseAgent,
                  collector: BaseCollector,
                  rollout_len: int,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
-        self.policy = policy
+        self.agent = agent
         self.collector = collector
         self.rollout_len = rollout_len
-        self.logger = logger
-        self._init_default_loggers()
+        super().__init__(logger)
 
         self.buffer = self.collector.buffer
         self.num_envs = self.collector.env.num_envs
@@ -72,10 +72,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         self.callbacks = callbacks
 
     def learn(self, total_timesteps: int) -> None:
-        """ Main loop for running the on policy algorithm
+        """ Main loop for running the on-policy algorithm
 
         Args:
-            total_timesteps (int): Total environment timesteps to run
+            total_timesteps (int): Total environment time steps to run
         """
 
         train_start_time = time()
@@ -90,7 +90,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             iteration_start_time = time()
             
             num_timesteps = self.collector.collect(self.rollout_len)
-            loss_dict = self.train()
+            self.train()
             iteration += 1
 
             self.logger.iteration.push(iteration)

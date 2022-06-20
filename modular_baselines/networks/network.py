@@ -5,7 +5,7 @@ from gym.spaces import Space, Box, Discrete
 
 class SharedFeatureNetwork(torch.nn.Module):
 
-    def __init__(self, observation_space: Space, action_space: Space, hidden_size: int = 128, lr: float = 1e-4):
+    def __init__(self, observation_space: Space, action_space: Space, hidden_size: int = 128):
         super().__init__()
 
         self.observation_space = observation_space
@@ -16,7 +16,6 @@ class SharedFeatureNetwork(torch.nn.Module):
         if isinstance(action_space, Box):
             self.out_size = self.out_size * 2
 
-        self.lr = lr
         self.hidden_size = hidden_size
         self.feature = torch.nn.Sequential(
             torch.nn.Linear(self.in_size, hidden_size),
@@ -31,8 +30,6 @@ class SharedFeatureNetwork(torch.nn.Module):
 
         torch.nn.init.xavier_normal_(self.policy_head.weight, 0.01)
         self.value_head = torch.nn.Linear(hidden_size, 1)
-
-        self._optimizer = torch.optim.Adam(self.parameters(), lr=lr)
 
     def forward(self, state: torch.Tensor, *args
                 ) -> Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]:
@@ -53,7 +50,7 @@ class SharedFeatureNetwork(torch.nn.Module):
 
 class SeparateFeatureNetwork(torch.nn.Module):
 
-    def __init__(self, observation_space: Space, action_space: Space, policy_hidden_size: int = 128, value_hidden_size: int = 200, lr: float = 0.0001):
+    def __init__(self, observation_space: Space, action_space: Space, policy_hidden_size: int = 128, value_hidden_size: int = 200):
         super().__init__()
         self.observation_space = observation_space
         self.action_space = action_space
@@ -63,7 +60,6 @@ class SeparateFeatureNetwork(torch.nn.Module):
         if isinstance(action_space, Box):
             self.out_size = self.out_size * 2
 
-        self.lr = lr
         self.policy_hidden_size = policy_hidden_size
         self.value_hidden_size = value_hidden_size
 
@@ -83,7 +79,6 @@ class SeparateFeatureNetwork(torch.nn.Module):
         )
 
         torch.nn.init.xavier_normal_(self.policy_net[-1].weight, 0.01)
-        self._optimizer = torch.optim.Adam(self.parameters(), lr=lr)
 
     def forward(self, state: torch.Tensor, *args
                 ) -> Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]:

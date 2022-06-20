@@ -5,6 +5,7 @@ import warnings
 from abc import ABC, abstractmethod
 
 from modular_baselines.loggers.data_logger import DataLogger
+from modular_baselines.component import Component
 
 
 class BaseBufferCallback(ABC):
@@ -25,7 +26,7 @@ class BaseBufferCallback(ABC):
         pass
 
 
-class BaseBuffer(ABC):
+class BaseBuffer(Component):
 
     @abstractmethod
     def push(self):
@@ -36,7 +37,7 @@ class BaseBuffer(ABC):
         pass
 
 
-class Buffer():
+class Buffer(BaseBuffer):
     """ Standard buffer for both on-policy and off-policy agents.
 
     Implements a queue structure with a finite capacity. When the buffer is full it overwrites the
@@ -59,8 +60,7 @@ class Buffer():
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
-        self.logger = logger
-        self._init_default_loggers()
+        super().__init__(logger)
 
         if not isinstance(callbacks, (list, tuple)):
             callbacks = [callbacks] if callbacks is not None else []

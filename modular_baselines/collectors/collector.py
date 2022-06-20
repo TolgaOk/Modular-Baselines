@@ -1,15 +1,14 @@
-from multiprocessing.sharedctypes import Value
-import re
+
+from typing import List, Optional, Union, Dict, Any, Tuple
 import numpy as np
 from gym.spaces import Discrete, Box
-
-from typing import List, Optional, Union
 from abc import ABC, abstractmethod
 
 from stable_baselines3.common.vec_env import VecEnv
 
+from modular_baselines.component import Component
 from modular_baselines.buffers.buffer import BaseBuffer
-from modular_baselines.algorithms.policy import BasePolicy
+from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.loggers.data_logger import DataLogger, ListLog
 
 
@@ -31,7 +30,7 @@ class BaseCollectorCallback(ABC):
         pass
 
 
-class BaseCollector(ABC):
+class BaseCollector(Component):
     """ Base abstract class for collectors """
 
     @abstractmethod
@@ -40,18 +39,16 @@ class BaseCollector(ABC):
 
 
 class RolloutCollector(BaseCollector):
-    """ Collects a rollout with every collect
-    call and add the experience into the buffer.
+    """ Collects a rollout with every collect call and add the experience into the buffer.
 
     Args:
         env (VecEnv): Vectorized environment
-        buffer (BaseBuffer): Buffer to load rollout experiences
-        policy (torch.nn.Module): Policy module for action sampling
-        callbacks (List[BaseCollectorCallback], optional): Collector callbacks.
-            Defaults to [].
-        device (str, optional): torch device that is used to convert
-            experiences before feeding them into the policy module. Defaults
-            to "cpu".
+        buffer (BaseBuffer): Buffer to push rollout experiences
+        agent (BaseAgent): Action sampling agent
+        logger (DataLogger): _description_
+        callbacks (Optional[Union[List[BaseCollectorCallback],
+                                    BaseCollectorCallback]], optional
+                    ): Collector Callback. Defaults to [] (no callbacks).
     """
 
     _fields = ("observation", "next_observation", "reward",
@@ -60,24 +57,21 @@ class RolloutCollector(BaseCollector):
     def __init__(self,
                  env: VecEnv,
                  buffer: BaseBuffer,
-                 policy: BasePolicy,
+                 agent: BaseAgent,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseCollectorCallback],
                                            BaseCollectorCallback]] = None):
-        super().__init__()
-
         self.env = env
         self.buffer = buffer
-        self.policy = policy
-        self.logger = logger
-        self._init_default_loggers()
+        self.agent = agent
+        super().__init__(logger)
 
         for field in self._fields:
             assert field in buffer.struct.names, (
                 "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
-        self._last_policy_state = policy.init_hidden_state(batch_size=self.env.num_envs)
+        self._last_policy_state = agent.init_hidden_state(batch_size=self.env.num_envs)
         self._last_obs = self.env.reset()
 
         if not isinstance(callbacks, (list, tuple)):
@@ -86,17 +80,17 @@ class RolloutCollector(BaseCollector):
 
     def _init_default_loggers(self) -> None:
         loggers = dict(
-            env_reward = ListLog(
+            env_reward=ListLog(
                 formatting=lambda values: "ep_rew_mean: {:.1f}".format(np.mean(values))
             ),
-            env_length = ListLog(
+            env_length=ListLog(
                 formatting=lambda values: "ep_len_mean: {:.1f}".format(np.mean(values))
             )
         )
         self.logger.add_if_not_exists(loggers)
 
     def collect(self, n_rollout_steps: int) -> int:
-        """ Collect a rollout of experience using the policy and load them to
+        """ Collect a rollout of experience using the agent and load them to
         buffer
 
         Args:
@@ -112,9 +106,9 @@ class RolloutCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, policy_state, policy_context = self.policy.sample_action(
+            actions, policy_state, policy_context = self.agent.sample_action(
                 self._last_obs, self._last_policy_state)
-            
+
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
             # Terminated new_obs is different than next_obs
@@ -156,12 +150,12 @@ class RolloutCollector(BaseCollector):
 
         return self.num_timesteps
 
-    def environment_step(self, action):
+    def environment_step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
         if isinstance(self.env.action_space, Discrete):
-            action = action.reshape(-1)
+            actions = actions.reshape(-1)
         if isinstance(self.env.action_space, Box):
-            action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
-        observation, rewards, dones, infos = self.env.step(action)
+            actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
+        observation, rewards, dones, infos = self.env.step(actions)
         rewards = rewards.reshape(-1, 1)
         dones = dones.reshape(-1, 1)
         return observation, rewards, dones, infos
