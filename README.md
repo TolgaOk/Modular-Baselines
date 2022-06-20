@@ -9,6 +9,13 @@ Modular-Baselines is a Reinforcement Learning (RL) library, based on [Stable-Bas
 |  A2C  |:x:|:heavy_check_mark:|
 |  PPO  |:x:|:heavy_check_mark:|
 
+- - -
 
+There are 5 main components in Modular Baselines, namely buffer, collector, agent, algorithm and network. Buffer, Collector and Algorithm are framework agnostic while agent and network depend on the framework of choice.
 
+<img src="./docs/design.svg">
 
+- - -
+Modular Baseline adopts Object Oriented design for modularity. The class structure is shown below.
+
+<img src="./docs/class_inheritance.svg">

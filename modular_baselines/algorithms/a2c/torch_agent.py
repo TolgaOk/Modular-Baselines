@@ -1,26 +1,16 @@
-from typing import Tuple, Union, Dict, Generator
+from typing import Tuple, Union, Dict, Generator, Any
 from abc import abstractmethod
 import numpy as np
 import torch
 from gym.spaces import Discrete
-from torch.types import Device
 
 from modular_baselines.algorithms.advantages import calculate_gae
-from modular_baselines.algorithms.a2c.a2c import A2CPolicy
+from modular_baselines.algorithms.agent import TorchAgent
+from modular_baselines.loggers.data_logger import ListLog
 
 
-class TorchA2CPolicy(A2CPolicy):
+class TorchA2CAgent(TorchAgent):
     """ Pytorch A2C Policy base class """
-
-    @property
-    @abstractmethod
-    def device(self) -> Device:
-        pass
-
-    @property
-    @abstractmethod
-    def optimizer(self) -> torch.optim.Optimizer:
-        pass
 
     def maybe_to_torch(self, ndarray: np.ndarray):
         return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
@@ -34,18 +24,17 @@ class TorchA2CPolicy(A2CPolicy):
     def maybe_take_last_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
         return tensor[:, -1] if tensor is not None else None
 
-
     def sample_action(self,
                       observation: np.ndarray,
                       policy_state: Union[np.ndarray, None],
-                      ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                      ) -> Tuple[np.ndarray, Union[np.ndarray, None], Dict[str, Any]]:
 
         with torch.no_grad():
             th_observation = self.maybe_to_torch(observation).float()
             th_policy_state = self.maybe_to_torch(policy_state)
             th_policy_state = th_policy_state.float() if th_policy_state is not None else None
 
-            policy_dist, policy_state, _ = self(th_observation, th_policy_state)
+            policy_dist, policy_state, _ = self.policy(th_observation, th_policy_state)
             th_action = policy_dist.sample()
             if isinstance(self.action_space, Discrete):
                 th_action = th_action.unsqueeze(-1)
@@ -77,9 +66,10 @@ class TorchA2CPolicy(A2CPolicy):
         th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = self.rollout_to_torch(
             sample)
 
-        policy_dist, _, th_flatten_values = self(*map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
+        policy_dist, _, th_flatten_values = self.policy(
+            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
         tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, _, th_next_values = self(th_next_obs, th_next_policy_state)
+        _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
 
         advantages, returns = map(
             self.maybe_to_torch,
@@ -106,9 +96,28 @@ class TorchA2CPolicy(A2CPolicy):
 
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
         self.optimizer.step()
+
+        self.logger.value_loss.push(value_loss.item())
+        self.logger.policy_loss.push(policy_loss.item())
+        self.logger.entropy_loss.push(entropy_loss.item())
 
         return dict(value_loss=value_loss.item(),
                     policy_loss=policy_loss.item(),
                     entropy_loss=entropy_loss.item())
+
+    def _init_default_loggers(self) -> None:
+        super()._init_default_loggers()
+        loggers = dict(
+            value_loss=ListLog(
+                formatting=lambda value: "value_loss: {:.3f}".format(np.mean(value))
+            ),
+            policy_loss=ListLog(
+                formatting=lambda value: "policy_loss: {:.3f}".format(np.mean(value))
+            ),
+            entropy_loss=ListLog(
+                formatting=lambda value: "entropy_loss: {:.3f}".format(np.mean(value))
+            ),
+        )
+        self.logger.add_if_not_exists(loggers)
