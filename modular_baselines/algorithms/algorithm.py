@@ -96,7 +96,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             self.logger.iteration.push(iteration)
             self.logger.timesteps.push(num_timesteps)
             self.logger.time_elapsed.push(time() - train_start_time)
-            self.logger.iteration_time.push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
+            self.logger.fps.push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
 
             for callback in self.callbacks:
                 callback.on_step(locals())
@@ -108,17 +108,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         
     def _init_default_loggers(self) -> None:
         loggers = dict(
-            iteration = DataLog(
-                formatting=lambda value: "iterations: {}".format(value)
-            ),
-            timesteps = DataLog(
-                formatting=lambda value: "total_timesteps: {}".format(value)
-            ),
-            time_elapsed = DataLog(
-                formatting=lambda value: "time_elapsed: {:.1f} s".format(value)
-            ),
-            iteration_time = ListLog(
-                formatting=lambda values: "fps: {}".format(int(1 / np.mean(values)))
-            ),
+            iteration = DataLog(formatting=lambda value: value),
+            timesteps = DataLog(formatting=lambda value: value),
+            time_elapsed = DataLog(formatting=lambda value: value),
+            fps = ListLog(formatting=lambda values: int(1 / np.mean(values))),
         )
         self.logger.add_if_not_exists(loggers)

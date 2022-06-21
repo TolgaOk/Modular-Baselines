@@ -80,12 +80,8 @@ class RolloutCollector(BaseCollector):
 
     def _init_default_loggers(self) -> None:
         loggers = dict(
-            env_reward=ListLog(
-                formatting=lambda values: "ep_rew_mean: {:.1f}".format(np.mean(values))
-            ),
-            env_length=ListLog(
-                formatting=lambda values: "ep_len_mean: {:.1f}".format(np.mean(values))
-            )
+            env_reward=ListLog(formatting=lambda values: np.mean(values)),
+            env_length=ListLog(formatting=lambda values: np.mean(values))
         )
         self.logger.add_if_not_exists(loggers)
 
