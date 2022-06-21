@@ -24,9 +24,11 @@ class PPO(OnPolicyAlgorithm):
                  gamma: float,
                  gae_lambda: float,
                  epochs: int,
+                 lr: Coefficient,
                  clip_value: Coefficient,
                  batch_size: int,
                  max_grad_norm: float,
+                 normalize_advantage: bool,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
@@ -40,7 +42,9 @@ class PPO(OnPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
+        self.normalize_advantage = normalize_advantage
         self.epochs = epochs
+        self.lr = lr
         self.clip_value = clip_value
         self.batch_size = batch_size
 
@@ -61,9 +65,11 @@ class PPO(OnPolicyAlgorithm):
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
             epochs=self.epochs,
+            lr=next(self.lr),
             clip_value=next(self.clip_value),
             batch_size=self.batch_size,
-            max_grad_norm=self.max_grad_norm)
+            max_grad_norm=self.max_grad_norm,
+            normalize_advantage=self.normalize_advantage)
 
     @staticmethod
     def setup(env: VecEnv,
@@ -75,9 +81,11 @@ class PPO(OnPolicyAlgorithm):
               gamma: float,
               gae_lambda: float,
               epochs: int,
+              lr: Coefficient,
               clip_value: Coefficient,
               batch_size: int,
               max_grad_norm: float,
+              normalize_advantage: bool,
               buffer_callbacks: Optional[Union[List[BaseBufferCallback],
                                                BaseBufferCallback]] = None,
               collector_callbacks: Optional[Union[List[BaseCollectorCallback],
@@ -124,9 +132,11 @@ class PPO(OnPolicyAlgorithm):
             gamma=gamma,
             gae_lambda=gae_lambda,
             epochs=epochs,
+            lr=lr,
             clip_value=clip_value,
             batch_size=batch_size,
             max_grad_norm=max_grad_norm,
+            normalize_advantage=normalize_advantage,
             logger=data_logger,
             callbacks=algorithm_callbacks
         )

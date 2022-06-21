@@ -48,7 +48,8 @@ class TorchPPOAgent(TorchAgent):
         th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state, th_old_log_prob = self.rollout_to_torch(
             sample)
 
-        _, _, th_flatten_values = self.policy(*map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
+        _, _, th_flatten_values = self.policy(
+            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
         tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
         _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
 
@@ -81,20 +82,23 @@ class TorchPPOAgent(TorchAgent):
                           gamma: float,
                           gae_lambda: float,
                           epochs: int,
+                          lr: float,
                           clip_value: float,
                           batch_size: int,
                           max_grad_norm: float,
+                          normalize_advantage: bool,
                           ) -> Dict[str, float]:
         """ Pytorch A2C parameter update method """
 
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
         rollout_data = self.prepare_rollout(sample, gamma, gae_lambda)
-
-        value_losses = []
-        policy_losses = []
-        entropy_losses = []
 
         for epoch in range(epochs):
             for advantages, returns, obs, policy_state, action, old_log_prob in self.rollout_loader(batch_size, *rollout_data):
+
+                if normalize_advantage:
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                 policy_dist, _, values = self.policy(obs, policy_state)
                 if isinstance(self.action_space, Discrete):
@@ -116,29 +120,23 @@ class TorchPPOAgent(TorchAgent):
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
                 self.optimizer.step()
 
-                value_losses.append(value_loss.item())
-                policy_losses.append(policy_loss.item())
-                entropy_losses.append(entropy_loss.item())
+                self.logger.value_loss.push(value_loss.item())
+                self.logger.policy_loss.push(policy_loss.item())
+                self.logger.entropy_loss.push(entropy_loss.item())
+                self.logger.approxkl.push(((ratio - 1) - ratio.log()).mean().item())
+        self.logger.clip_range.push(clip_value)
+        self.logger.learning_rate.push(lr)
 
-        self.logger.value_loss.push(np.mean(value_losses))
-        self.logger.policy_loss.push(np.mean(policy_losses))
-        self.logger.entropy_loss.push(np.mean(entropy_losses))
-
-        return dict(value_loss=np.mean(value_losses),
-                    policy_loss=np.mean(policy_losses),
-                    entropy_loss=np.mean(entropy_losses))
+        return dict()
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = dict(
-            value_loss=ListLog(
-                formatting=lambda value: "value_loss: {:.3f}".format(np.mean(value))
-            ),
-            policy_loss=ListLog(
-                formatting=lambda value: "policy_loss: {:.3f}".format(np.mean(value))
-            ),
-            entropy_loss=ListLog(
-                formatting=lambda value: "entropy_loss: {:.3f}".format(np.mean(value))
-            ),
+            value_loss=ListLog(formatting=lambda values: np.mean(values)),
+            policy_loss=ListLog(formatting=lambda values: np.mean(values)),
+            entropy_loss=ListLog(formatting=lambda values: np.mean(values)),
+            learning_rate=ListLog(formatting=lambda values: np.max(values)),
+            clip_range=ListLog(formatting=lambda values: np.max(values)),
+            approxkl=ListLog(formatting=lambda values: np.mean(values)),
         )
         self.logger.add_if_not_exists(loggers)
