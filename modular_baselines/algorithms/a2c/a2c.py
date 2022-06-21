@@ -69,10 +69,6 @@ class A2C(OnPolicyAlgorithm):
             gae_lambda=self.gae_lambda,
             max_grad_norm=self.max_grad_norm)
 
-    def save(self, path: str) -> None:
-        raise NotImplementedError
-        # self.agent.policy.save(os.path.join(path, "agent_params.b"))
-
     @staticmethod
     def setup(env: VecEnv,
               agent: BaseAgent,

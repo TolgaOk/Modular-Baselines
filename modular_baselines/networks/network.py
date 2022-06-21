@@ -1,5 +1,6 @@
 from typing import List, Any, Dict, Union, Optional, Tuple, Callable
 import torch
+import numpy as np
 from gym.spaces import Space, Box, Discrete
 
 
@@ -50,7 +51,7 @@ class SharedFeatureNetwork(torch.nn.Module):
 
 class SeparateFeatureNetwork(torch.nn.Module):
 
-    def __init__(self, observation_space: Space, action_space: Space, policy_hidden_size: int = 128, value_hidden_size: int = 200):
+    def __init__(self, observation_space: Space, action_space: Space, policy_hidden_size: int = 64, value_hidden_size: int = 64):
         super().__init__()
         self.observation_space = observation_space
         self.action_space = action_space
@@ -64,21 +65,19 @@ class SeparateFeatureNetwork(torch.nn.Module):
         self.value_hidden_size = value_hidden_size
 
         self.policy_net = torch.nn.Sequential(
-            torch.nn.Linear(self.in_size, policy_hidden_size),
+            layer_init(torch.nn.Linear(self.in_size, policy_hidden_size)),
             torch.nn.Tanh(),
-            torch.nn.Linear(policy_hidden_size, policy_hidden_size),
+            layer_init(torch.nn.Linear(policy_hidden_size, policy_hidden_size)),
             torch.nn.Tanh(),
-            torch.nn.Linear(policy_hidden_size, self.out_size)
+            layer_init(torch.nn.Linear(policy_hidden_size, self.out_size), std=0.01)
         )
         self.value_net = torch.nn.Sequential(
-            torch.nn.Linear(self.in_size, value_hidden_size),
-            torch.nn.RReLU(),
-            torch.nn.Linear(value_hidden_size, value_hidden_size),
-            torch.nn.RReLU(),
-            torch.nn.Linear(value_hidden_size, 1)
+            layer_init(torch.nn.Linear(self.in_size, value_hidden_size)),
+            torch.nn.Tanh(),
+            layer_init(torch.nn.Linear(value_hidden_size, value_hidden_size)),
+            torch.nn.Tanh(),
+            layer_init(torch.nn.Linear(value_hidden_size, 1), std=1.0)
         )
-
-        torch.nn.init.xavier_normal_(self.policy_net[-1].weight, 0.01)
 
     def forward(self, state: torch.Tensor, *args
                 ) -> Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]:
@@ -95,6 +94,11 @@ class SeparateFeatureNetwork(torch.nn.Module):
         dist = get_dist(logits, self.action_space)
         return dist, None, value
 
+
+def layer_init(layer, std: float = np.sqrt(2), bias_const: float = 0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 def get_dist(logits: torch.Tensor, action_space: Union[Box, Discrete]
              ) -> Union[torch.distributions.Normal, torch.distributions.Categorical]:

@@ -28,14 +28,7 @@ class BaseAgent(Component):
         pass
 
     @abstractmethod
-    def update_parameters(self,
-                          sample: np.ndarray,
-                          value_coef: float,
-                          ent_coef: float,
-                          gamma: float,
-                          gae_lambda: float,
-                          max_grad_norm: float,
-                          ) -> Dict[str, float]:
+    def update_parameters(self, sample: np.ndarray) -> Dict[str, float]:
         """ Update policy parameters using the given sample and a2c update mechanism.
 
             Args:
@@ -75,7 +68,19 @@ class TorchAgent(BaseAgent):
         return None
 
     def train_mode(self):
-        self.policy.train()
+        self.policy.train(True)
 
     def eval_mode(self):
-        self.policy.eval()
+        self.policy.train(False)
+
+    def maybe_to_torch(self, ndarray: np.ndarray):
+        return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
+
+    def maybe_flatten_batch(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
+        if tensor is not None:
+            n_envs, n_rollout = tensor.shape[:2]
+            return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
+        return None
+
+    def maybe_take_last_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
+        return tensor[:, -1] if tensor is not None else None

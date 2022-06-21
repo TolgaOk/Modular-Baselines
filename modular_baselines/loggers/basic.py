@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 from abc import ABC, abstractmethod
 
-from stable_baselines3.common.logger import Logger
+from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
 from stable_baselines3.common.utils import safe_mean
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
@@ -55,19 +55,22 @@ class InitLogCallback(BaseAlgorithmCallback):
         pass
 
 
-class STDOUTLoggerCallback(BaseAlgorithmCallback):
+class LogOutCallback(BaseAlgorithmCallback):
 
-    def __init__(self, interval: int) -> None:
+    def __init__(self, interval: int,
+                 dir_path: str,
+                 writers: List[Union[CSVOutputFormat, HumanOutputFormat, JSONOutputFormat]]
+                 ) -> None:
         super().__init__()
         self.interval = interval
+        self.sb3_logger = Logger(dir_path, writers)
 
     def on_step(self, locals_: Dict[str, Any]) -> bool:
         if locals_["iteration"] % self.interval == 0:
             logger = locals_["self"].logger
-            print("-" * 20)
-            for data_log in logger.__dict__.values():
-                print(f"| {data_log.formatting(data_log.dump())}")
-            print("-" * 20)
+            for name, data_log in logger.__dict__.items():
+                self.sb3_logger.record(name, data_log.formatting(data_log.dump()))
+            self.sb3_logger.dump()
 
     def on_training_start(self, *args) -> None:
         pass

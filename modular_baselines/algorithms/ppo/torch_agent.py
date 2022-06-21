@@ -6,28 +6,12 @@ from torch.types import Device
 from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
-from modular_baselines.algorithms.ppo.ppo import PPOPolicy
+from modular_baselines.algorithms.agent import TorchAgent
+from modular_baselines.loggers.data_logger import ListLog
 
 
-class TorchPPOPolicy(PPOPolicy):
-    """ Pytorch A2C Policy base class """
-
-    @property
-    @abstractmethod
-    def device(self) -> Device:
-        pass
-
-    @property
-    @abstractmethod
-    def optimizer(self) -> torch.optim.Optimizer:
-        pass
-
-    @abstractmethod
-    def forward(self,
-                observation: torch.Tensor,
-                policy_state: Union[None, torch.Tensor],
-                ) -> Tuple[torch.distributions.Distribution, Union[torch.Tensor, None], torch.Tensor]:
-        pass
+class TorchPPOAgent(TorchAgent):
+    """ Pytorch PPO Agent """
 
     def sample_action(self,
                       observation: np.ndarray,
@@ -39,24 +23,12 @@ class TorchPPOPolicy(PPOPolicy):
             th_policy_state = self.maybe_to_torch(policy_state)
             th_policy_state = th_policy_state.float() if th_policy_state is not None else None
 
-            policy_dist, policy_state, value = self(th_observation, th_policy_state)
+            policy_dist, policy_state, value = self.policy(th_observation, th_policy_state)
             th_action = policy_dist.sample()
             log_prob = policy_dist.log_prob(th_action).unsqueeze(-1)
             if isinstance(self.action_space, Discrete):
                 th_action = th_action.unsqueeze(-1)
         return th_action.cpu().numpy(), policy_state, {"old_log_prob": log_prob.cpu().numpy()}
-
-    def maybe_to_torch(self, ndarray: Union[np.ndarray, None]) -> Union[torch.Tensor, None]:
-        return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
-
-    def maybe_take_last_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        return tensor[:, -1] if tensor is not None else None
-
-    def maybe_flatten_batch(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        if tensor is not None:
-            n_envs, n_rollout = tensor.shape[:2]
-            return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
-        return None
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
         policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
@@ -76,9 +48,10 @@ class TorchPPOPolicy(PPOPolicy):
         th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state, th_old_log_prob = self.rollout_to_torch(
             sample)
 
-        _, _, th_flatten_values = self(*map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
+        _, _, th_flatten_values = self.policy(
+            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
         tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, _, th_next_values = self(th_next_obs, th_next_policy_state)
+        _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
 
         advantages, returns = map(
             self.maybe_to_torch,
@@ -92,7 +65,7 @@ class TorchPPOPolicy(PPOPolicy):
         )
 
         return list(map(self.maybe_flatten_batch,
-                   (advantages, returns, th_obs, th_policy_state, th_action, th_old_log_prob)))
+                        (advantages, returns, th_obs, th_policy_state, th_action, th_old_log_prob)))
 
     def rollout_loader(self, batch_size: int, *tensors: Tuple[torch.Tensor]) -> Generator[Tuple[torch.Tensor], None, None]:
         if len(tensors) == 0:
@@ -109,22 +82,25 @@ class TorchPPOPolicy(PPOPolicy):
                           gamma: float,
                           gae_lambda: float,
                           epochs: int,
+                          lr: float,
                           clip_value: float,
                           batch_size: int,
                           max_grad_norm: float,
+                          normalize_advantage: bool,
                           ) -> Dict[str, float]:
         """ Pytorch A2C parameter update method """
 
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
         rollout_data = self.prepare_rollout(sample, gamma, gae_lambda)
-
-        value_losses = []
-        policy_losses = []
-        entropy_losses = []
 
         for epoch in range(epochs):
             for advantages, returns, obs, policy_state, action, old_log_prob in self.rollout_loader(batch_size, *rollout_data):
 
-                policy_dist, _, values = self(obs, policy_state)
+                if normalize_advantage:
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                policy_dist, _, values = self.policy(obs, policy_state)
                 if isinstance(self.action_space, Discrete):
                     action = action.squeeze(-1)
                 log_probs = policy_dist.log_prob(action).unsqueeze(-1)
@@ -141,14 +117,26 @@ class TorchPPOPolicy(PPOPolicy):
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
                 self.optimizer.step()
 
+                self.logger.value_loss.push(value_loss.item())
+                self.logger.policy_loss.push(policy_loss.item())
+                self.logger.entropy_loss.push(entropy_loss.item())
+                self.logger.approxkl.push(((ratio - 1) - ratio.log()).mean().item())
+        self.logger.clip_range.push(clip_value)
+        self.logger.learning_rate.push(lr)
 
-                value_losses.append(value_loss.item())
-                policy_losses.append(policy_loss.item())
-                entropy_losses.append(entropy_loss.item())
+        return dict()
 
-        return dict(value_loss=np.mean(value_losses),
-                    policy_loss=np.mean(policy_losses),
-                    entropy_loss=np.mean(entropy_losses))
+    def _init_default_loggers(self) -> None:
+        super()._init_default_loggers()
+        loggers = dict(
+            value_loss=ListLog(formatting=lambda values: np.mean(values)),
+            policy_loss=ListLog(formatting=lambda values: np.mean(values)),
+            entropy_loss=ListLog(formatting=lambda values: np.mean(values)),
+            learning_rate=ListLog(formatting=lambda values: np.max(values)),
+            clip_range=ListLog(formatting=lambda values: np.max(values)),
+            approxkl=ListLog(formatting=lambda values: np.mean(values)),
+        )
+        self.logger.add_if_not_exists(loggers)
