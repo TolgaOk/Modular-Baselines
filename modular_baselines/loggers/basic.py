@@ -8,7 +8,6 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 
 from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
-from stable_baselines3.common.utils import safe_mean
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
 from modular_baselines.collectors.collector import BaseCollectorCallback

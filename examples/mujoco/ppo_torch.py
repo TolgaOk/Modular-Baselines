@@ -23,7 +23,7 @@ def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    log_dir = f"logs/PPO-{env_name}-{seed}"
+    log_dir = f"logs/ppo-{env_name.lower()}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     writers = [HumanOutputFormat(sys.stdout),

@@ -21,7 +21,7 @@ def setup(env_name: str, hyperparameters: Dict[str, Any], seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    log_dir = f"logs/PPO-{env_name}-{seed}"
+    log_dir = f"logs/a2c-{env_name.lower()}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     writers = [HumanOutputFormat(sys.stdout),
@@ -70,8 +70,8 @@ a2c_mujoco_walker2d_hyperparameters = dict(
     n_steps=8,
     ent_coef=1e-4,
     vf_coef=0.5,
-    lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (2048 * 16)),
-    gamma=0.999,
+    lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (8 * 16)),
+    gamma=0.99,
     gae_lambda=0.95,
     max_grad_norm=1.0,
     normalize_advantage=True,
@@ -82,4 +82,4 @@ a2c_mujoco_walker2d_hyperparameters = dict(
 
 
 if __name__ == "__main__":
-    agent = setup("Swimmer-v4", a2c_mujoco_walker2d_hyperparameters, seed=1007)
+    agent = setup("Swimmer-v4", a2c_mujoco_walker2d_hyperparameters, seed=1006)

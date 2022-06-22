@@ -93,7 +93,7 @@ class RolloutCollector(BaseCollector):
             n_rollout_steps (int): Length of the rollout
 
         Returns:
-            int: Total number of timesteps passed.
+            int: Total number of time steps passed.
         """
 
         n_steps = 0
@@ -107,7 +107,7 @@ class RolloutCollector(BaseCollector):
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
-            # Terminated new_obs is different than next_obs
+            # Terminated new_obs is different than the given next_obs
             terminated_indexes = np.argwhere(dones.flatten() == 1).flatten()
             if len(terminated_indexes) > 0:
                 next_obs = new_obs.copy()
