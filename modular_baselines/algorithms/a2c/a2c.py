@@ -9,6 +9,7 @@ from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgori
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.loggers.data_logger import DataLogger
+from modular_baselines.utils.annealings import Coefficient
 
 
 class A2C(OnPolicyAlgorithm):
@@ -35,7 +36,9 @@ class A2C(OnPolicyAlgorithm):
                  value_coef: float,
                  gamma: float,
                  gae_lambda: float,
+                 lr: Coefficient,
                  max_grad_norm: float,
+                 normalize_advantage: bool,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
@@ -47,9 +50,11 @@ class A2C(OnPolicyAlgorithm):
 
         self.gamma = gamma
         self.gae_lambda = gae_lambda
+        self.lr = lr
         self.ent_coef = ent_coef
         self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
+        self.normalize_advantage = normalize_advantage
 
     def train(self) -> Dict[str, float]:
         """ One step training. This will be called once per rollout.
@@ -67,7 +72,9 @@ class A2C(OnPolicyAlgorithm):
             ent_coef=self.ent_coef,
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
-            max_grad_norm=self.max_grad_norm)
+            lr=next(self.lr),
+            max_grad_norm=self.max_grad_norm,
+            normalize_advantage=self.normalize_advantage)
 
     @staticmethod
     def setup(env: VecEnv,
@@ -78,7 +85,9 @@ class A2C(OnPolicyAlgorithm):
               value_coef: float,
               gamma: float,
               gae_lambda: float,
+              lr: Coefficient,
               max_grad_norm: float,
+              normalize_advantage: bool,
               buffer_callbacks: Optional[Union[List[BaseBufferCallback],
                                                BaseBufferCallback]] = None,
               collector_callbacks: Optional[Union[List[BaseCollectorCallback],
@@ -139,5 +148,17 @@ class A2C(OnPolicyAlgorithm):
 
         buffer = Buffer(struct, rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
-        return A2C(agent, collector, rollout_len, ent_coef, value_coef,
-                   gamma, gae_lambda, max_grad_norm, data_logger, algorithm_callbacks)
+        return A2C(
+            agent=agent,
+            collector=collector,
+            rollout_len=rollout_len,
+            ent_coef=ent_coef,
+            value_coef=value_coef,
+            gamma=gamma,
+            gae_lambda=gae_lambda,
+            lr=lr,
+            max_grad_norm=max_grad_norm,
+            normalize_advantage=normalize_advantage,
+            logger=data_logger,
+            callbacks=algorithm_callbacks,
+        )
