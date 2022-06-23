@@ -1,7 +1,7 @@
 from typing import List, Optional, Union, Dict, Tuple, Any
-import os
 from gym import spaces
 import numpy as np
+from dataclasses import dataclass
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
@@ -10,6 +10,18 @@ from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.loggers.data_logger import DataLogger
 from modular_baselines.utils.annealings import Coefficient
+
+
+@dataclass(frozen=True)
+class A2CArgs():
+    rollout_len: int
+    ent_coef: float
+    value_coef: float
+    gamma: float
+    gae_lambda: float
+    lr: Coefficient
+    max_grad_norm: float
+    normalize_advantage: bool
 
 
 class A2C(OnPolicyAlgorithm):
@@ -31,30 +43,16 @@ class A2C(OnPolicyAlgorithm):
     def __init__(self,
                  agent: BaseAgent,
                  collector: RolloutCollector,
-                 rollout_len: int,
-                 ent_coef: float,
-                 value_coef: float,
-                 gamma: float,
-                 gae_lambda: float,
-                 lr: Coefficient,
-                 max_grad_norm: float,
-                 normalize_advantage: bool,
+                 args: A2CArgs,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
         super().__init__(agent=agent,
                          collector=collector,
-                         rollout_len=rollout_len,
+                         rollout_len=args.rollout_len,
                          logger=logger,
                          callbacks=callbacks)
-
-        self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.lr = lr
-        self.ent_coef = ent_coef
-        self.value_coef = value_coef
-        self.max_grad_norm = max_grad_norm
-        self.normalize_advantage = normalize_advantage
+        self.args = args
 
     def train(self) -> Dict[str, float]:
         """ One step training. This will be called once per rollout.
@@ -64,30 +62,23 @@ class A2C(OnPolicyAlgorithm):
         """
         self.agent.train_mode()
         sample = self.buffer.sample(batch_size=self.num_envs,
-                                    rollout_len=self.rollout_len,
-                                    sampling_length=self.rollout_len)
+                                    rollout_len=self.args.rollout_len,
+                                    sampling_length=self.args.rollout_len)
         return self.agent.update_parameters(
             sample,
-            value_coef=self.value_coef,
-            ent_coef=self.ent_coef,
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
-            lr=next(self.lr),
-            max_grad_norm=self.max_grad_norm,
-            normalize_advantage=self.normalize_advantage)
+            value_coef=self.args.value_coef,
+            ent_coef=self.args.ent_coef,
+            gamma=self.args.gamma,
+            gae_lambda=self.args.gae_lambda,
+            lr=next(self.args.lr),
+            max_grad_norm=self.args.max_grad_norm,
+            normalize_advantage=self.args.normalize_advantage)
 
     @staticmethod
     def setup(env: VecEnv,
               agent: BaseAgent,
               data_logger: DataLogger,
-              rollout_len: int,
-              ent_coef: float,
-              value_coef: float,
-              gamma: float,
-              gae_lambda: float,
-              lr: Coefficient,
-              max_grad_norm: float,
-              normalize_advantage: bool,
+              args: A2CArgs,
               buffer_callbacks: Optional[Union[List[BaseBufferCallback],
                                                BaseBufferCallback]] = None,
               collector_callbacks: Optional[Union[List[BaseCollectorCallback],
@@ -146,19 +137,12 @@ class A2C(OnPolicyAlgorithm):
             *policy_states_dtype
         ])
 
-        buffer = Buffer(struct, rollout_len, env.num_envs, data_logger, buffer_callbacks)
+        buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
         return A2C(
             agent=agent,
             collector=collector,
-            rollout_len=rollout_len,
-            ent_coef=ent_coef,
-            value_coef=value_coef,
-            gamma=gamma,
-            gae_lambda=gae_lambda,
-            lr=lr,
-            max_grad_norm=max_grad_norm,
-            normalize_advantage=normalize_advantage,
+            args=args,
             logger=data_logger,
             callbacks=algorithm_callbacks,
         )
