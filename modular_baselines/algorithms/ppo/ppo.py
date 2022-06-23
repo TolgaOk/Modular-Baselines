@@ -3,6 +3,8 @@ from abc import abstractmethod
 import os
 from gym import spaces
 import numpy as np
+from dataclasses import dataclass
+
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
@@ -13,40 +15,36 @@ from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from modular_baselines.loggers.data_logger import DataLogger
 
 
+@dataclass(frozen=True)
+class PPOArgs():
+    rollout_len: int
+    ent_coef: float
+    value_coef: float
+    gamma: float
+    gae_lambda: float
+    epochs: int
+    lr: Coefficient
+    clip_value: Coefficient
+    batch_size: int
+    max_grad_norm: float
+    normalize_advantage: bool
+
+
 class PPO(OnPolicyAlgorithm):
 
     def __init__(self,
                  agent: BaseAgent,
                  collector: RolloutCollector,
-                 rollout_len: int,
-                 ent_coef: float,
-                 value_coef: float,
-                 gamma: float,
-                 gae_lambda: float,
-                 epochs: int,
-                 lr: Coefficient,
-                 clip_value: Coefficient,
-                 batch_size: int,
-                 max_grad_norm: float,
-                 normalize_advantage: bool,
+                 args: PPOArgs,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                            BaseAlgorithmCallback]] = None):
         super().__init__(agent=agent,
                          collector=collector,
-                         rollout_len=rollout_len,
+                         rollout_len=args.rollout_len,
                          logger=logger,
                          callbacks=callbacks)
-        self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.ent_coef = ent_coef
-        self.value_coef = value_coef
-        self.max_grad_norm = max_grad_norm
-        self.normalize_advantage = normalize_advantage
-        self.epochs = epochs
-        self.lr = lr
-        self.clip_value = clip_value
-        self.batch_size = batch_size
+        self.args = args
 
     def train(self) -> Dict[str, float]:
         """ One step training. This will be called once per rollout.
@@ -56,36 +54,26 @@ class PPO(OnPolicyAlgorithm):
         """
         self.agent.train_mode()
         sample = self.buffer.sample(batch_size=self.num_envs,
-                                    rollout_len=self.rollout_len,
-                                    sampling_length=self.rollout_len)
+                                    rollout_len=self.args.rollout_len,
+                                    sampling_length=self.args.rollout_len)
         return self.agent.update_parameters(
             sample,
-            value_coef=self.value_coef,
-            ent_coef=self.ent_coef,
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
-            epochs=self.epochs,
-            lr=next(self.lr),
-            clip_value=next(self.clip_value),
-            batch_size=self.batch_size,
-            max_grad_norm=self.max_grad_norm,
-            normalize_advantage=self.normalize_advantage)
+            value_coef=self.args.value_coef,
+            ent_coef=self.args.ent_coef,
+            gamma=self.args.gamma,
+            gae_lambda=self.args.gae_lambda,
+            epochs=self.args.epochs,
+            lr=next(self.args.lr),
+            clip_value=next(self.args.clip_value),
+            batch_size=self.args.batch_size,
+            max_grad_norm=self.args.max_grad_norm,
+            normalize_advantage=self.args.normalize_advantage)
 
     @staticmethod
     def setup(env: VecEnv,
               agent: BaseAgent,
               data_logger: DataLogger,
-              rollout_len: int,
-              ent_coef: float,
-              value_coef: float,
-              gamma: float,
-              gae_lambda: float,
-              epochs: int,
-              lr: Coefficient,
-              clip_value: Coefficient,
-              batch_size: int,
-              max_grad_norm: float,
-              normalize_advantage: bool,
+              args: PPOArgs,
               buffer_callbacks: Optional[Union[List[BaseBufferCallback],
                                                BaseBufferCallback]] = None,
               collector_callbacks: Optional[Union[List[BaseCollectorCallback],
@@ -121,22 +109,12 @@ class PPO(OnPolicyAlgorithm):
             ("old_log_prob", np.float32, (1,)),
             *policy_states_dtype
         ])
-        buffer = Buffer(struct, rollout_len, env.num_envs, data_logger, buffer_callbacks)
+        buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
         return PPO(
             agent=agent,
             collector=collector,
-            rollout_len=rollout_len,
-            ent_coef=ent_coef,
-            value_coef=value_coef,
-            gamma=gamma,
-            gae_lambda=gae_lambda,
-            epochs=epochs,
-            lr=lr,
-            clip_value=clip_value,
-            batch_size=batch_size,
-            max_grad_norm=max_grad_norm,
-            normalize_advantage=normalize_advantage,
+            args=args,
             logger=data_logger,
             callbacks=algorithm_callbacks
         )
