@@ -365,8 +365,8 @@ class ComparisonScalarRender(MultiScalarRender):
         }
 
         self.setup()
-        self.set_components()
         self.set_figure()
+        self.set_components()
         self.default_check_boxes()
 
     def setup(self):
@@ -447,8 +447,17 @@ class ComparisonScalarRender(MultiScalarRender):
             widgets.Label("Color")
         ],
             layout=row_layout)
-        self.selector = widgets.VBox([header] + self.selector_widgets)
+        title_selector = widgets.Text(
+            "",
+            placeholder="Title",
+            layout=widgets.Layout(width="200px"))
+        title_selector.observe(self.set_title, "value")
+
+        self.selector = widgets.VBox([title_selector, header] + self.selector_widgets)
         super().set_components()
+
+    def set_title(self, change):
+        self.fig.update_layout(title=change["new"])
 
     def _get_legend_name_nd_color(self, folder_name):
         for row_widget in self.selector_widgets:
@@ -488,13 +497,16 @@ class ComparisonScalarRender(MultiScalarRender):
                 self.fig,
             ])
         ],
-        titles=["Select Log", "Figure"],
-        layout=Layout(
+            layout=Layout(
             width="96%",
             height="600px",
             display="flex",
             flex_flow="column",
             justify_content="space-around",
             border="solid 2px gray"
-        ))
+        )
+        )
+        out_display.set_title(0, "Select Log")
+        out_display.set_title(1, "Figure")
+
         return out_display
