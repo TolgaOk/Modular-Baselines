@@ -1,4 +1,4 @@
-from typing import Optional, Any, Dict, Tuple, Union
+from typing import Optional, Any, Dict, Tuple, Union, List, Callable
 from abc import ABC, abstractmethod
 import numpy as np
 from torch.types import Device
@@ -49,6 +49,19 @@ class BaseAgent(Component):
         pass
 
 
+def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
+    def nested_wrapper(self, collection: Union[np.ndarray, Dict[str, Any]]):
+        if isinstance(collection, dict):
+            return {name: nested_wrapper(self, value) for name, value in collection.items()}
+        if isinstance(collection, (list, tuple)):
+            cls = type(collection)
+            return cls([nested_wrapper(self, value) for value in collection])
+        if isinstance(collection, (torch.Tensor, np.ndarray)):
+            return function(self, collection)
+        raise ValueError(f"Type {type(collection)} is not supported!")
+    return nested_wrapper
+
+
 class TorchAgent(BaseAgent):
 
     def __init__(self, policy: torch.nn.Module,
@@ -70,9 +83,11 @@ class TorchAgent(BaseAgent):
     def eval_mode(self):
         self.policy.train(False)
 
+    @nested
     def to_torch(self, ndarray: np.ndarray):
-        return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
+        return torch.from_numpy(ndarray).to(self.device)
 
-    def flatten_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
+    @nested
+    def flatten_time(self, tensor: torch.Tensor) -> torch.Tensor:
         n_envs, n_rollout = tensor.shape[:2]
         return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])

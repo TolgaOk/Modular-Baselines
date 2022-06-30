@@ -1,19 +1,19 @@
 from typing import Any, Dict
 from argparse import ArgumentParser
 
-from modular_baselines.algorithms.a2c import A2C, A2CArgs
-from modular_baselines.algorithms.a2c.torch_agent import TorchA2CAgent
-from modular_baselines.networks.network import SeparateFeatureNetwork
+from modular_baselines.algorithms.a2c import LstmA2C, A2CArgs
+from modular_baselines.algorithms.a2c.torch_lstm_agent import TorchLSTMA2CAgent
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
+from modular_baselines.networks.network import LSTMSeparateNetwork
 
 from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
 def a2c_setup(env_name: str, config: Dict[str, Any], seed: int):
-    return setup(A2C, TorchA2CAgent, SeparateFeatureNetwork, env_name, config, seed)
+    return setup(LstmA2C, TorchLSTMA2CAgent, LSTMSeparateNetwork, env_name, config, seed)
 
 
-a2c_mujoco_config = MujocoTorchConfig(
+lstm_a2c_mujoco_config = MujocoTorchConfig(
     args=A2CArgs(
         rollout_len=8,
         ent_coef=1e-4,
@@ -31,8 +31,8 @@ a2c_mujoco_config = MujocoTorchConfig(
 )
 
 if __name__ == "__main__":
-    parser = ArgumentParser("A2C Mujoco")
+    parser = ArgumentParser("LSTM A2C Mujoco")
     add_arguments(parser)
     cli_args = parser.parse_args()
-    parallel_run(a2c_setup, a2c_mujoco_config, n_procs=cli_args.n_procs,
+    parallel_run(a2c_setup, lstm_a2c_mujoco_config, n_procs=cli_args.n_procs,
                  env_names=cli_args.env_names, n_seeds=cli_args.n_seeds)

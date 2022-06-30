@@ -101,7 +101,7 @@ class RolloutCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, policy_context = self.agent.sample_action(self._last_obs)
+            actions, policy_context = self.get_actions()
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
@@ -140,6 +140,9 @@ class RolloutCollector(BaseCollector):
 
         return self.num_timesteps
 
+    def get_actions(self):
+        return self.agent.sample_action(self._last_obs)
+
     def environment_step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
         if isinstance(self.env.action_space, Discrete):
             actions = actions.reshape(-1)
@@ -149,3 +152,54 @@ class RolloutCollector(BaseCollector):
         rewards = rewards.reshape(-1, 1)
         dones = dones.reshape(-1, 1)
         return observation, rewards, dones, infos
+
+
+class HiddenResetCallback(BaseCollectorCallback):
+
+    def on_rollout_start(self, *args) -> None:
+        pass
+
+    def on_rollout_end(self, *args) -> None:
+        pass
+
+    def on_rollout_step(self, locals_: Dict[str, Any]) -> bool:
+        dones = locals_["dones"].reshape(-1, 1).astype(np.float32)
+        hidden_states = locals_["self"]._last_hidden_state
+        agent = locals_["self"].agent
+        n_env = locals_["self"].env.num_envs
+
+        if np.sum(dones) > 0:
+            reset_states = agent.init_hidden_state(n_env)
+            for (name, hidden_state), (name_reset, reset_state) in zip(hidden_states.items(), reset_states.items()):
+                hidden_states[name] = hidden_state * (1 - dones) + reset_state * dones
+
+
+class RecurrentRolloutCollector(RolloutCollector):
+
+    def __init__(self,
+                 env: VecEnv,
+                 buffer: BaseBuffer,
+                 agent: BaseAgent,
+                 logger: DataLogger,
+                 callbacks: Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]] = None):
+        reset_callback = HiddenResetCallback()
+        if callbacks is None:
+            callbacks = []
+        if not isinstance(callbacks, (list, tuple)):
+            callbacks = [callbacks]
+        callbacks = [reset_callback, *callbacks]
+
+        super().__init__(env, buffer, agent, logger, callbacks)
+        self._last_hidden_state = self.agent.init_hidden_state(batch_size=env.num_envs)
+
+    def get_actions(self):
+        actions, hidden_states, policy_context = self.agent.sample_action(
+            self._last_obs, self._last_hidden_state)
+        buffer_info = {**self._last_hidden_state,
+                       **{f"next_{key}": value for key, value in hidden_states.items()}}
+        self._last_hidden_state = hidden_states
+        for name in buffer_info.keys():
+            if name in policy_context.keys():
+                raise RuntimeError("Policy context conflicts with hidden state keys")
+        policy_context.update(buffer_info)
+        return actions, policy_context

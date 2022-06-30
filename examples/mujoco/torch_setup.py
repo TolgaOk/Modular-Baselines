@@ -30,6 +30,7 @@ class MujocoTorchConfig():
 
 def setup(algorithm_cls: Type[BaseAlgorithm],
           agent_cls: Type[BaseAgent],
+          network: Type[torch.nn.Module],
           env_name: str,
           config: MujocoTorchConfig,
           seed: int
@@ -54,7 +55,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
         vec_env_cls=SubprocVecEnv)
     vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
 
-    policy = SeparateFeatureNetwork(observation_space=vecenv.observation_space,
+    policy = network(observation_space=vecenv.observation_space,
                                     action_space=vecenv.action_space)
     policy.to(config.device)
     optimizer = torch.optim.Adam(policy.parameters(), eps=1e-5)
