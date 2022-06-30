@@ -1,3 +1,4 @@
+from typing import Any, Callable, Dict, List, Optional, Union, Type
 import time
 from collections import deque
 import numpy as np
@@ -5,10 +6,8 @@ import os
 import json
 from collections import defaultdict
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
 
-from stable_baselines3.common.logger import Logger
-from stable_baselines3.common.utils import safe_mean
+from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
 from modular_baselines.collectors.collector import BaseCollectorCallback
@@ -55,6 +54,30 @@ class InitLogCallback(BaseAlgorithmCallback):
         pass
 
 
+class LogOutCallback(BaseAlgorithmCallback):
+
+    def __init__(self, interval: int,
+                 dir_path: str,
+                 writers: List[Union[CSVOutputFormat, HumanOutputFormat, JSONOutputFormat]]
+                 ) -> None:
+        super().__init__()
+        self.interval = interval
+        self.sb3_logger = Logger(dir_path, writers)
+
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
+        if locals_["iteration"] % self.interval == 0:
+            logger = locals_["self"].logger
+            for name, data_log in logger.__dict__.items():
+                self.sb3_logger.record(name, data_log.formatting(data_log.dump()))
+            self.sb3_logger.dump()
+
+    def on_training_start(self, *args) -> None:
+        pass
+
+    def on_training_end(self, *args) -> None:
+        pass
+
+
 class LogRolloutCallback(BaseCollectorCallback):
     """ Accumulate the rewards and episode lengths of the experiences gathered
     by the collector. At the end of a rollout, record the average values. 
@@ -88,12 +111,13 @@ class LogRolloutCallback(BaseCollectorCallback):
 
     def on_rollout_end(self, locals_: Dict[str, Any]) -> None:
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
-            self.logger.record_mean(
-                "rollout/ep_rew_mean",
-                safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
-            self.logger.record_mean(
-                "rollout/ep_len_mean",
-                safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+            for ep_info in self.ep_info_buffer:
+                self.logger.record_mean(
+                    "rollout/ep_rew_mean",
+                    ep_info["r"])
+                self.logger.record_mean(
+                    "rollout/ep_len_mean",
+                    ep_info["l"])
         self.reset_info()
 
 
