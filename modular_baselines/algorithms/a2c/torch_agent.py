@@ -46,10 +46,15 @@ class TorchA2CAgent(TorchAgent):
                           ent_coef: float,
                           gamma: float,
                           gae_lambda: float,
+                          lr: float,
                           max_grad_norm: float,
+                          normalize_advantage: bool,
                           ) -> Dict[str, float]:
         """ Pytorch A2C parameter update method """
         env_size, rollout_size = sample["observation"].shape[:2]
+
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
 
         th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = self.rollout_to_torch(
             sample)
@@ -77,6 +82,9 @@ class TorchA2CAgent(TorchAgent):
             lambda tensor: tensor.reshape(env_size * rollout_size, 1),
             (tf_values, advantages, returns, log_probs, entropies))
 
+        if normalize_advantage:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
         value_loss = torch.nn.functional.mse_loss(values, returns)
         policy_loss = (-log_probs * advantages).mean()
         entropy_loss = -entropies.mean()
@@ -90,22 +98,16 @@ class TorchA2CAgent(TorchAgent):
         self.logger.value_loss.push(value_loss.item())
         self.logger.policy_loss.push(policy_loss.item())
         self.logger.entropy_loss.push(entropy_loss.item())
+        self.logger.learning_rate.push(lr)
 
-        return dict(value_loss=value_loss.item(),
-                    policy_loss=policy_loss.item(),
-                    entropy_loss=entropy_loss.item())
+        return dict()
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = dict(
-            value_loss=ListLog(
-                formatting=lambda value: "value_loss: {:.3f}".format(np.mean(value))
-            ),
-            policy_loss=ListLog(
-                formatting=lambda value: "policy_loss: {:.3f}".format(np.mean(value))
-            ),
-            entropy_loss=ListLog(
-                formatting=lambda value: "entropy_loss: {:.3f}".format(np.mean(value))
-            ),
+            value_loss=ListLog(formatting=lambda value: np.mean(value)),
+            policy_loss=ListLog(formatting=lambda value: np.mean(value)),
+            entropy_loss=ListLog(formatting=lambda value: np.mean(value)),
+            learning_rate=ListLog(formatting=lambda values: np.max(values)),
         )
         self.logger.add_if_not_exists(loggers)
