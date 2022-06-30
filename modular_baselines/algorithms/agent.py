@@ -64,23 +64,15 @@ class TorchAgent(BaseAgent):
     def device(self) -> Device:
         return next(iter(self.policy.parameters())).device
 
-    def init_hidden_state(self, batch_size=None) -> None:
-        return None
-
     def train_mode(self):
         self.policy.train(True)
 
     def eval_mode(self):
         self.policy.train(False)
 
-    def maybe_to_torch(self, ndarray: np.ndarray):
+    def to_torch(self, ndarray: np.ndarray):
         return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
 
-    def maybe_flatten_batch(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        if tensor is not None:
-            n_envs, n_rollout = tensor.shape[:2]
-            return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
-        return None
-
-    def maybe_take_last_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        return tensor[:, -1] if tensor is not None else None
+    def flatten_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
+        n_envs, n_rollout = tensor.shape[:2]
+        return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])

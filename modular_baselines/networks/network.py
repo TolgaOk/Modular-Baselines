@@ -33,20 +33,20 @@ class SharedFeatureNetwork(torch.nn.Module):
         self.value_head = torch.nn.Linear(hidden_size, 1)
 
     def forward(self, state: torch.Tensor, *args
-                ) -> Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]:
+                ) -> Tuple[torch.distributions.Normal, torch.Tensor]:
         """ Return policy distribution and value
         Args:
             state (torch.Tensor): State tensor
         Returns:
-            Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]: 
-                policy distribution, None, value
+            Tuple[torch.distributions.Normal, torch.Tensor]: 
+                policy distribution, value
         """
         feature = self.feature(state)
         logits = self.policy_head(feature)
         value = self.value_head(feature)
 
         dist = get_dist(logits, self.action_space)
-        return dist, None, value
+        return dist, value
 
 
 class SeparateFeatureNetwork(torch.nn.Module):
@@ -80,25 +80,26 @@ class SeparateFeatureNetwork(torch.nn.Module):
         )
 
     def forward(self, state: torch.Tensor, *args
-                ) -> Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]:
+                ) -> Tuple[torch.distributions.Normal, torch.Tensor]:
         """ Return policy distribution and value
         Args:
             state (torch.Tensor): State tensor
         Returns:
-            Tuple[torch.distributions.Normal, Optional[torch.Tensor], torch.Tensor]: 
+            Tuple[torch.distributions.Normal, torch.Tensor]: 
                 policy distribution, None, value
         """
         logits = self.policy_net(state)
         value = self.value_net(state)
 
         dist = get_dist(logits, self.action_space)
-        return dist, None, value
+        return dist, value
 
 
 def layer_init(layer, std: float = np.sqrt(2), bias_const: float = 0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
+
 
 def get_dist(logits: torch.Tensor, action_space: Union[Box, Discrete]
              ) -> Union[torch.distributions.Normal, torch.distributions.Categorical]:

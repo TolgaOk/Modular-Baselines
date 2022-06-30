@@ -12,33 +12,29 @@ from modular_baselines.loggers.data_logger import ListLog
 class TorchA2CAgent(TorchAgent):
     """ Pytorch A2C Agent """
 
+    def init_hidden_state(self, batch_size=None) -> None:
+        return None
+
     def sample_action(self,
                       observation: np.ndarray,
-                      policy_state: Union[np.ndarray, None],
                       ) -> Tuple[np.ndarray, Union[np.ndarray, None], Dict[str, Any]]:
 
         with torch.no_grad():
-            th_observation = self.maybe_to_torch(observation).float()
-            th_policy_state = self.maybe_to_torch(policy_state)
-            th_policy_state = th_policy_state.float() if th_policy_state is not None else None
+            th_observation = self.to_torch(observation).float()
 
-            policy_dist, policy_state, _ = self.policy(th_observation, th_policy_state)
+            policy_dist, _ = self.policy(th_observation)
             th_action = policy_dist.sample()
             if isinstance(self.action_space, Discrete):
                 th_action = th_action.unsqueeze(-1)
-        return th_action.cpu().numpy(), policy_state, {}
+        return th_action.cpu().numpy(), {}
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
-        next_policy_state = sample["next_policy_state"] if "next_policy_state" in sample.dtype.names else None
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = [
-            self.maybe_to_torch(array) for array in
+        th_obs, th_action, th_next_obs = [
+            self.to_torch(array) for array in
             (sample["observation"],
-             policy_state,
              sample["action"],
-             self.maybe_take_last_time(sample["next_observation"]),
-             self.maybe_take_last_time(next_policy_state))]
-        return th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state
+             sample["next_observation"][:, -1])]
+        return th_obs, th_action, th_next_obs
 
     def update_parameters(self,
                           sample: np.ndarray,
@@ -56,16 +52,13 @@ class TorchA2CAgent(TorchAgent):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = self.rollout_to_torch(
-            sample)
-
-        policy_dist, _, th_flatten_values = self.policy(
-            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
+        th_obs, th_action, th_next_obs = self.rollout_to_torch(sample)
+        policy_dist, th_flatten_values = self.policy(self.flatten_time(th_obs))
         tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
+        _, th_next_values = self.policy(th_next_obs)
 
         advantages, returns = map(
-            self.maybe_to_torch,
+            self.to_torch,
             calculate_gae(
                 rewards=sample["reward"],
                 terminations=sample["termination"],
@@ -75,7 +68,7 @@ class TorchA2CAgent(TorchAgent):
                 gae_lambda=gae_lambda)
         )
 
-        log_probs = policy_dist.log_prob(self.maybe_flatten_batch(th_action))
+        log_probs = policy_dist.log_prob(self.flatten_time(th_action))
         entropies = policy_dist.entropy()
 
         values, advantages, returns, log_probs, entropies = map(

@@ -71,7 +71,6 @@ class RolloutCollector(BaseCollector):
                 "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
-        self._last_policy_state = agent.init_hidden_state(batch_size=self.env.num_envs)
         self._last_obs = self.env.reset()
 
         if not isinstance(callbacks, (list, tuple)):
@@ -102,8 +101,7 @@ class RolloutCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, policy_state, policy_context = self.agent.sample_action(
-                self._last_obs, self._last_policy_state)
+            actions, policy_context = self.agent.sample_action(self._last_obs)
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
@@ -117,9 +115,6 @@ class RolloutCollector(BaseCollector):
             self.num_timesteps += self.env.num_envs
             n_steps += 1
 
-            if self._last_policy_state is not None:
-                policy_context["policy_state"] = self._last_policy_state
-                policy_context["next_policy_state"] = policy_state
             self.buffer.push({
                 "observation": self._last_obs,
                 "next_observation": next_obs,
@@ -136,7 +131,6 @@ class RolloutCollector(BaseCollector):
                     self.logger.env_length.push(maybe_ep_info["l"])
 
             self._last_obs = new_obs
-            self._last_policy_state = policy_state
 
             for callback in self.callbacks:
                 callback.on_rollout_step(locals())
