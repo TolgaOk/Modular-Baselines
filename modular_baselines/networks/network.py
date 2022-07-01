@@ -125,22 +125,19 @@ class LSTMSeparateNetwork(torch.nn.Module):
     def hidden_state_info(self) -> Dict[str, int]:
         return dict(value_hx=self.value_hidden_size,
                     value_cx=self.value_hidden_size,
-                    policy_cx=self.policy_hidden_size,
-                    policy_hx=self.policy_hidden_size)
+                    policy_hx=self.policy_hidden_size,
+                    policy_cx=self.policy_hidden_size)
 
     def forward(self,
                 state: torch.Tensor,
                 hidden_states: Dict[str, torch.Tensor]
                 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
 
-        if hidden_states is None:
-            hidden_states = {name: None for name in self.hidden_state_info.keys()}
-        policy_hx, policy_cx = hidden_states["policy_cx"], hidden_states["policy_hx"]
-        value_hx, value_cx = hidden_states["value_cx"], hidden_states["value_hx"]
+        policy_hx, policy_cx = hidden_states["policy_hx"], hidden_states["policy_cx"]
+        value_hx, value_cx = hidden_states["value_hx"], hidden_states["value_cx"]
 
         policy_features = torch.tanh(self.policy_in_layer(state))
-        policy_hx, policy_cx = self.policy_lstm(
-            policy_features, (policy_hx, policy_cx))
+        policy_hx, policy_cx = self.policy_lstm(policy_features, (policy_hx, policy_cx))
         policy_logits = self.policy_out(policy_hx)
 
         value_features = torch.tanh(self.value_in_layer(state))
@@ -159,7 +156,7 @@ def linear_layer_init(layer: torch.nn.Linear, std: float = np.sqrt(2), bias_cons
     return layer
 
 
-def lstm_init(layer: torch.nn.LSTMCell, std: float = np.sqrt(2), bias_const: float = 0.0):
+def lstm_init(layer: torch.nn.LSTMCell, std: float = 1, bias_const: float = 0.0):
     for name, param in layer.named_parameters():
         if "bias" in name:
             torch.nn.init.constant_(param, bias_const)
