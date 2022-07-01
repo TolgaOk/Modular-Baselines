@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Dict, Generator, Any
+from typing import Tuple, Union, Dict, Generator, Any, List
 from abc import abstractmethod
 import numpy as np
 import torch
@@ -36,6 +36,26 @@ class TorchA2CAgent(TorchAgent):
              sample["next_observation"][:, -1])]
         return th_obs, th_action, th_next_obs
 
+    def prepare_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
+        env_size, rollout_size = sample["observation"].shape[:2]
+        th_obs, th_action, th_next_obs = self.rollout_to_torch(
+            sample)
+
+        policy_dist, th_flatten_values = self.policy(self.flatten_time(th_obs))
+
+        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
+        _, th_next_value = self.policy(th_next_obs)
+        advantages, returns = self.to_torch(calculate_gae(
+                rewards=sample["reward"],
+                terminations=sample["termination"],
+                values=tf_values.detach().cpu().numpy(),
+                last_value=th_next_value.detach().cpu().numpy(),
+                gamma=gamma,
+                gae_lambda=gae_lambda)
+        )
+
+        return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
+
     def update_parameters(self,
                           sample: np.ndarray,
                           value_coef: float,
@@ -52,28 +72,15 @@ class TorchA2CAgent(TorchAgent):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-        th_obs, th_action, th_next_obs = self.rollout_to_torch(sample)
-        policy_dist, th_flatten_values = self.policy(self.flatten_time(th_obs))
-        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, th_next_values = self.policy(th_next_obs)
+        advantages, returns, th_action, policy_dist, th_values = self.prepare_rollout(
+            sample, gamma=gamma, gae_lambda=gae_lambda)
 
-        advantages, returns = map(
-            self.to_torch,
-            calculate_gae(
-                rewards=sample["reward"],
-                terminations=sample["termination"],
-                values=tf_values.detach().cpu().numpy(),
-                last_value=th_next_values.detach().cpu().numpy(),
-                gamma=gamma,
-                gae_lambda=gae_lambda)
-        )
-
-        log_probs = policy_dist.log_prob(self.flatten_time(th_action))
+        log_probs = policy_dist.log_prob((th_action))
         entropies = policy_dist.entropy()
 
         values, advantages, returns, log_probs, entropies = map(
             lambda tensor: tensor.reshape(env_size * rollout_size, 1),
-            (tf_values, advantages, returns, log_probs, entropies))
+            (th_values, advantages, returns, log_probs, entropies))
 
         if normalize_advantage:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
