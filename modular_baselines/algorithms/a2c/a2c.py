@@ -80,7 +80,7 @@ class A2C(OnPolicyAlgorithm):
             raise NotImplementedError("Only Box observations are available")
         if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
             raise NotImplementedError("Only Discrete and Box actions are available")
-        # Check for recurrent policy
+
         action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
         return observation_space, action_space, action_dim
 
@@ -104,12 +104,9 @@ class A2C(OnPolicyAlgorithm):
             data_logger (DataLogger): Logger for saving training log data
             rollout_len (int): Length of the rollout per update
             args (A2CArgs): Hyperparameters of the algorithm
-            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]],
-                optional): Buffer callback(s). Defaults to None.
-            collector_callbacks (Optional[Union[List[BaseCollectorCallback],
-                BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
-            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback],
-                BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
+            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]], optional): Buffer callback(s). Defaults to None.
+            collector_callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
+            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
 
         Raises:
             NotImplementedError: If the observation space is not Box
@@ -139,6 +136,7 @@ class A2C(OnPolicyAlgorithm):
 
 
 class LstmA2C(A2C):
+    """ LSTM based A2C agent """
 
     @staticmethod
     def setup(env: VecEnv,

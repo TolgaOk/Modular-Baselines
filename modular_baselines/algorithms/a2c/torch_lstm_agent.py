@@ -24,7 +24,8 @@ class TorchLSTMA2CAgent(TorchA2CAgent):
             th_observation = self.to_torch(observation).float()
             th_hidden_state = {name: self.to_torch(array) for name, array in hidden_state.items()}
 
-            policy_dist, _, th_hidden_state = self.policy(th_observation, th_hidden_state)
+            policy_params, _, th_hidden_state = self.policy(th_observation, th_hidden_state)
+            policy_dist = self.policy.dist(policy_params)
             th_action = policy_dist.sample()
             if isinstance(self.action_space, Discrete):
                 th_action = th_action.unsqueeze(-1)
@@ -32,31 +33,69 @@ class TorchLSTMA2CAgent(TorchA2CAgent):
         return th_action.cpu().numpy(), hidden_state, {}
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        th_obs, th_action, th_next_obs, th_hidden_states, th_next_hidden_states = self.to_torch(
+        th_obs, th_action, th_dones, th_next_obs, th_hidden_states, th_next_hidden_states = self.to_torch(
             [sample["observation"],
              sample["action"],
+             sample["termination"],
              sample["next_observation"][:, -1],
              {name: sample[name] for name in self.policy.hidden_state_info.keys()},
-             {name: sample[f"next_{name}"][:, -1] for name in self.policy.hidden_state_info.keys()}
+             {name: sample[f"next_{name}"] for name in self.policy.hidden_state_info.keys()}
              ])
-        return th_obs, th_action, th_next_obs, th_hidden_states, th_next_hidden_states
+        return th_obs, th_action, th_dones, th_next_obs, th_hidden_states, th_next_hidden_states
 
-    def prepare_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
+    def replay_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
         env_size, rollout_size = sample["observation"].shape[:2]
-        th_obs, th_action, th_next_obs, th_hidden_state, th_next_hidden_state = self.rollout_to_torch(
+        th_obs, th_action, th_dones, th_next_obs, th_hidden_states, th_next_hidden_state = self.rollout_to_torch(
             sample)
 
-        policy_dist, th_flatten_values, _ = self.policy(*self.flatten_time([th_obs, th_hidden_state]))
+        policy_params = []
+        values = []
+        th_reset_state = self.to_torch(self.init_hidden_state(env_size))
+        th_hidden_state = {name: tensor[:, 0] for name, tensor in th_hidden_states.items()}
+        for step in range(rollout_size):
 
-        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, th_next_value, _ = self.policy(th_next_obs, th_next_hidden_state)
+            # Checking for consistency
+            for name, hidden_tensor in th_hidden_states.items():
+                if not torch.allclose(hidden_tensor[:, step], th_hidden_state[name], atol=1e-8):
+                    raise RuntimeError("Sampled and calculated hidden states are not matched!")
+
+            policy_param, value, th_hidden_state = self.policy(th_obs[:, step], th_hidden_state)
+            # policy_param, value, th_hidden_state = self.policy(th_obs[:, step], {name: tensor.detach() for name, tensor in th_hidden_state.items()})
+            policy_params.append(policy_param)
+            values.append(value)
+
+            # Checking for consistency
+            for name, hidden_tensor in th_next_hidden_state.items():
+                if not torch.allclose(hidden_tensor[:, step], th_hidden_state[name], atol=1e-8):
+                    raise RuntimeError(
+                        "Sampled and calculated next hidden states are not matched!")
+
+            th_done = th_dones[:, step]
+            for name, tensor in th_hidden_state.items():
+                th_hidden_state[name] = (tensor * (1 - th_done) + th_reset_state[name] * th_done).detach() 
+
+        th_values = torch.stack(values, dim=1)
+        th_flatten_values = self.flatten_time(th_values)
+        policy_params = self.flatten_time(torch.stack(policy_params, dim=1))
+        policy_dist = self.policy.dist(policy_params)
+
+        # Checking for value consistency
+        test_policy_parameters, test_values, _ = self.policy(*self.flatten_time([th_obs, th_hidden_states])) 
+        if not torch.allclose(th_flatten_values, test_values):
+            raise RuntimeError("Value mismatch")
+        if not torch.allclose(policy_params, test_policy_parameters):
+            raise RuntimeError("Policy dist parameters mismatch")
+
+        _, th_next_value, _ = self.policy(th_next_obs, {name: tensor[:, -1] for name, tensor in th_next_hidden_state.items()})
         advantages, returns = self.to_torch(calculate_gae(
-                rewards=sample["reward"],
-                terminations=sample["termination"],
-                values=tf_values.detach().cpu().numpy(),
-                last_value=th_next_value.detach().cpu().numpy(),
-                gamma=gamma,
-                gae_lambda=gae_lambda)
+            rewards=sample["reward"],
+            terminations=sample["termination"],
+            values=th_values.detach().cpu().numpy(),
+            last_value=th_next_value.detach().cpu().numpy(),
+            gamma=gamma,
+            gae_lambda=gae_lambda)
         )
 
         return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
+
+

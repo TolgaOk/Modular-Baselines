@@ -170,8 +170,8 @@ class HiddenResetCallback(BaseCollectorCallback):
 
         if np.sum(dones) > 0:
             reset_states = agent.init_hidden_state(n_env)
-            for (name, hidden_state), (name_reset, reset_state) in zip(hidden_states.items(), reset_states.items()):
-                hidden_states[name] = hidden_state * (1 - dones) + reset_state * dones
+            for name, hidden_state in hidden_states.items():
+                hidden_states[name] = hidden_state * (1 - dones) + reset_states[name] * dones
 
 
 class RecurrentRolloutCollector(RolloutCollector):

@@ -82,7 +82,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--n-procs", type=int, default=1,
                         help="Number of parallelized processes for experiments")
     parser.add_argument("--n-seeds", type=int, default=1,
-                        help="Number of seeds to per environment")
+                        help="Number of seeds/runs per environment")
     parser.add_argument("--env-names", nargs='+', type=str, required=True,
                         help="Gym environment names")
 
