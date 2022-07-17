@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, List, Optional, Union, Type
+import numpy as np
 
 
 class DataLog():
@@ -45,6 +46,25 @@ class DictLog(DataLog):
     def __init__(self) -> None:
         raise NotImplementedError
 
+
+class HistLog(DataLog):
+
+    def __init__(self, n_bins: int) -> None:
+        self.param_fn = None
+        self.n_bins = n_bins
+
+    def push(self, fetch_params_fn: Callable[[], Dict[str, np.ndarray]]) -> None:
+        self.param_fn = fetch_params_fn
+
+    def dump(self) -> Dict[str, Dict[str, List[Union[float, int]]]]:
+        params = self.param_fn()
+        histogram_data = {}
+        for name, param in params.items():
+            freqs, bins = np.histogram(param, bins=self.n_bins, density=True)
+            histogram_data[name] = {
+                    "bins": bins.tolist(),
+                    "freqs": freqs.tolist()}
+        return histogram_data
 
 class DataLogger():
 

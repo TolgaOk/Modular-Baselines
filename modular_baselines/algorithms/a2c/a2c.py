@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
+from modular_baselines.collectors.recurrent import RecurrentRolloutCollector
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.agent import BaseAgent
@@ -30,12 +31,7 @@ class A2C(OnPolicyAlgorithm):
     Args:
         agent (BaseAgent): A2C agent of the selected framework
         collector (RolloutCollector): Rollout collector instance
-        rollout_len (int): Length of the rollout per update
-        ent_coef (float): Entropy loss multiplier
-        value_coef (float): Value loss multiplier
-        gamma (float): Discount rate
-        gae_lambda (float): Eligibility trace lambda parameter
-        max_grad_norm (float): Gradient clipping magnitude
+        args (A2CArgs): Hyperparameters of the algorithm
         callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]],
             optional): Algorithm callback(s). Defaults to None.
     """
@@ -75,6 +71,21 @@ class A2C(OnPolicyAlgorithm):
             normalize_advantage=self.args.normalize_advantage)
 
     @staticmethod
+    def _setup(env: VecEnv):
+        # TODO: Add different observation spaces
+        observation_space = env.observation_space
+        # TODO: Add different action spaces
+        action_space = env.action_space
+
+        if not isinstance(observation_space, spaces.Box):
+            raise NotImplementedError("Only Box observations are available")
+        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
+            raise NotImplementedError("Only Discrete and Box actions are available")
+
+        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+        return observation_space, action_space, action_dim
+
+    @staticmethod
     def setup(env: VecEnv,
               agent: BaseAgent,
               data_logger: DataLogger,
@@ -93,17 +104,10 @@ class A2C(OnPolicyAlgorithm):
             agent (BaseAgent): An agent of the selected framework
             data_logger (DataLogger): Logger for saving training log data
             rollout_len (int): Length of the rollout per update
-            ent_coef (float): Entropy loss multiplier
-            value_coef (float): Value loss multiplier
-            gamma (float): Discount rate
-            gae_lambda (float): Eligibility trace lambda parameter
-            max_grad_norm (float): Gradient clipping magnitude
-            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]],
-                optional): Buffer callback(s). Defaults to None.
-            collector_callbacks (Optional[Union[List[BaseCollectorCallback],
-                BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
-            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback],
-                BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
+            args (A2CArgs): Hyperparameters of the algorithm
+            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]], optional): Buffer callback(s). Defaults to None.
+            collector_callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
+            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
 
         Raises:
             NotImplementedError: If the observation space is not Box
@@ -112,21 +116,7 @@ class A2C(OnPolicyAlgorithm):
         Returns:
             A2C: a2c agent
         """
-        # TODO: Add different observation spaces
-        observation_space = env.observation_space
-        # TODO: Add different action spaces
-        action_space = env.action_space
-
-        if not isinstance(observation_space, spaces.Box):
-            raise NotImplementedError("Only Box observations are available")
-        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
-            raise NotImplementedError("Only Discrete and Box actions are available")
-        policy_states_dtype = []
-        # Check for recurrent policy
-        policy_state = agent.init_hidden_state()
-        if policy_state is not None:
-            policy_states_dtype = [("policy_state", np.float32, policy_state.shape)]
-        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+        observation_space, action_space, action_dim = A2C._setup(env)
 
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
@@ -134,11 +124,63 @@ class A2C(OnPolicyAlgorithm):
             ("action", action_space.dtype, (action_dim,)),
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
-            *policy_states_dtype
+        ])
+        buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
+        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        return A2C(
+            agent=agent,
+            collector=collector,
+            args=args,
+            logger=data_logger,
+            callbacks=algorithm_callbacks,
+        )
+
+
+class LstmA2C(A2C):
+    """ LSTM based A2C agent """
+
+    @staticmethod
+    def setup(env: VecEnv,
+              agent: BaseAgent,
+              data_logger: DataLogger,
+              args: A2CArgs,
+              buffer_callbacks: Optional[Union[List[BaseBufferCallback],
+                                               BaseBufferCallback]] = None,
+              collector_callbacks: Optional[Union[List[BaseCollectorCallback],
+                                                  BaseCollectorCallback]] = None,
+              algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
+                                                  BaseAlgorithmCallback]] = None,
+              ) -> "LstmA2C":
+        """ A2C with LSTM agents
+
+        Args:
+            env (VecEnv): Vectorized gym environment
+            agent (BaseAgent): LSTM based agent of selected framework
+            data_logger (DataLogger): Logger for saving training log data
+            args (A2CArgs): Hyperparameters of the algorithm
+            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]], optional): Buffer callback(s). Defaults to None.
+            collector_callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
+            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
+
+        Returns:
+            LstmA2C: A2C with LSTM agent
+        """
+        observation_space, action_space, action_dim = A2C._setup(env)
+
+        struct = np.dtype([
+            ("observation", np.float32, observation_space.shape),
+            ("next_observation", np.float32, observation_space.shape),
+            ("action", action_space.dtype, (action_dim,)),
+            ("reward", np.float32, (1,)),
+            ("termination", np.float32, (1,)),
+            *[(name, np.float32, array.shape[1:])
+              for name, array in agent.init_hidden_state(1).items()],
+            *[(f"next_{name}", np.float32, array.shape[1:])
+              for name, array in agent.init_hidden_state(1).items()]
         ])
 
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
-        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
         return A2C(
             agent=agent,
             collector=collector,
