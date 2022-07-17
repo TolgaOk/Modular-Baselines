@@ -14,8 +14,7 @@ from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, 
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.networks.network import SeparateFeatureNetwork
-from modular_baselines.loggers.basic import LogOutCallback
+from modular_baselines.loggers.writers import ScalarWriter, HistogramWriter
 from modular_baselines.loggers.data_logger import DataLogger
 
 
@@ -41,11 +40,14 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
     log_dir = f"logs/{algorithm_cls.__name__}-{env_name.lower()}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
-    writers = [HumanOutputFormat(sys.stdout),
-               CSVOutputFormat(os.path.join(log_dir, "progress.csv")),
-               JSONOutputFormat(os.path.join(log_dir, "progress.json"))]
-    logger_callback = LogOutCallback(
-        interval=config.log_interval, dir_path=log_dir, writers=writers)
+    sb3_writers = [HumanOutputFormat(sys.stdout),
+                   CSVOutputFormat(os.path.join(log_dir, "progress.csv")),
+                   JSONOutputFormat(os.path.join(log_dir, "progress.json"))]
+    logger_callbacks = [
+        ScalarWriter(
+            interval=config.log_interval, dir_path=log_dir, writers=sb3_writers),
+        HistogramWriter(interval=config.log_interval, dir_path=log_dir)
+    ]
 
     vecenv = make_vec_env(
         env_name,
@@ -72,7 +74,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
         args=config.args,
         buffer_callbacks=None,
         collector_callbacks=None,
-        algorithm_callbacks=logger_callback)
+        algorithm_callbacks=logger_callbacks)
 
     learner.learn(total_timesteps=config.total_timesteps)
     return learner

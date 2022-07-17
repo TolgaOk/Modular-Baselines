@@ -76,10 +76,10 @@ class RolloutCollector(BaseCollector):
         self.callbacks = callbacks
 
     def _init_default_loggers(self) -> None:
-        loggers = dict(
-            env_reward=ListLog(formatting=lambda values: np.mean(values)),
-            env_length=ListLog(formatting=lambda values: np.mean(values))
-        )
+        loggers = {
+            "scalar/collector/env_reward": ListLog(formatting=lambda values: np.mean(values)),
+            "scalar/collector/env_length": ListLog(formatting=lambda values: np.mean(values))
+        }
         self.logger.add_if_not_exists(loggers)
 
     def collect(self, n_rollout_steps: int) -> int:
@@ -125,8 +125,8 @@ class RolloutCollector(BaseCollector):
             for idx, info in enumerate(infos):
                 maybe_ep_info = info.get("episode")
                 if maybe_ep_info is not None:
-                    self.logger.env_reward.push(maybe_ep_info["r"])
-                    self.logger.env_length.push(maybe_ep_info["l"])
+                    getattr(self.logger, "scalar/collector/env_reward").push(maybe_ep_info["r"])
+                    getattr(self.logger, "scalar/collector/env_length").push(maybe_ep_info["l"])
 
             self._last_obs = new_obs
 

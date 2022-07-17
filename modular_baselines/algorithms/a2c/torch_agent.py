@@ -6,7 +6,7 @@ from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.agent import TorchAgent
-from modular_baselines.loggers.data_logger import ListLog
+from modular_baselines.loggers.data_logger import ListLog, HistLog
 
 
 class TorchA2CAgent(TorchAgent):
@@ -94,19 +94,21 @@ class TorchA2CAgent(TorchAgent):
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
         self.optimizer.step()
 
-        self.logger.value_loss.push(value_loss.item())
-        self.logger.policy_loss.push(policy_loss.item())
-        self.logger.entropy_loss.push(entropy_loss.item())
-        self.logger.learning_rate.push(lr)
+        getattr(self.logger, "scalar/agent/value_loss").push(value_loss.item())
+        getattr(self.logger, "scalar/agent/policy_loss").push(policy_loss.item())
+        getattr(self.logger, "scalar/agent/entropy_loss").push(entropy_loss.item())
+        getattr(self.logger, "scalar/agent/learning_rate").push(lr)
+        getattr(self.logger, "histogram/params").push(self.param_dict_as_numpy)
 
         return dict()
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
-        loggers = dict(
-            value_loss=ListLog(formatting=lambda value: np.mean(value)),
-            policy_loss=ListLog(formatting=lambda value: np.mean(value)),
-            entropy_loss=ListLog(formatting=lambda value: np.mean(value)),
-            learning_rate=ListLog(formatting=lambda values: np.max(values)),
-        )
+        loggers = {
+            "scalar/agent/value_loss": ListLog(formatting=lambda value: np.mean(value)),
+            "scalar/agent/policy_loss": ListLog(formatting=lambda value: np.mean(value)),
+            "scalar/agent/entropy_loss": ListLog(formatting=lambda value: np.mean(value)),
+            "scalar/agent/learning_rate": ListLog(formatting=lambda values: np.max(values)),
+            "histogram/params": HistLog(n_bins=15),
+        }
         self.logger.add_if_not_exists(loggers)
