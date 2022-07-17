@@ -57,8 +57,9 @@ The log files of the runs can be visualized in Jupyter Notebook via visualizers.
 
 <p float="left">
   <img src="docs/notebook-renderer-1.png" width="45%" />
-  <img src="docs/notebook-renderer-2.png" width="45%" /> 
+  <img src="docs/notebook-renderer-2.png" width="45%" />
 </p>
+<img src="docs/notebook-renderer-3.png" width="45%" />
 
 ## Maintainers
 
