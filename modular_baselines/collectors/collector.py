@@ -45,14 +45,12 @@ class RolloutCollector(BaseCollector):
         env (VecEnv): Vectorized environment
         buffer (BaseBuffer): Buffer to push rollout experiences
         agent (BaseAgent): Action sampling agent
-        logger (DataLogger): _description_
-        callbacks (Optional[Union[List[BaseCollectorCallback],
-                                    BaseCollectorCallback]], optional
-                    ): Collector Callback. Defaults to [] (no callbacks).
+        logger (DataLogger): Data logger to log environment reward and lengths at termination
+        callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector Callback. Defaults to [] (no callbacks).
     """
 
-    _fields = ("observation", "next_observation", "reward",
-               "termination", "action")
+    _required_buffer_fields = ("observation", "next_observation", "reward",
+                               "termination", "action")
 
     def __init__(self,
                  env: VecEnv,
@@ -66,7 +64,7 @@ class RolloutCollector(BaseCollector):
         self.agent = agent
         super().__init__(logger)
 
-        for field in self._fields:
+        for field in self._required_buffer_fields:
             assert field in buffer.struct.names, (
                 "Buffer does not contain the field name {}".format(field))
 
@@ -101,7 +99,7 @@ class RolloutCollector(BaseCollector):
 
         while n_steps < n_rollout_steps:
 
-            actions, policy_context = self.get_actions()
+            actions, policy_content = self.get_actions()
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
@@ -121,7 +119,7 @@ class RolloutCollector(BaseCollector):
                 "reward": rewards,
                 "termination": dones,
                 "action": actions,
-                **policy_context
+                **policy_content
             })
 
             for idx, info in enumerate(infos):
@@ -152,54 +150,3 @@ class RolloutCollector(BaseCollector):
         rewards = rewards.reshape(-1, 1)
         dones = dones.reshape(-1, 1)
         return observation, rewards, dones, infos
-
-
-class HiddenResetCallback(BaseCollectorCallback):
-
-    def on_rollout_start(self, *args) -> None:
-        pass
-
-    def on_rollout_end(self, *args) -> None:
-        pass
-
-    def on_rollout_step(self, locals_: Dict[str, Any]) -> bool:
-        dones = locals_["dones"].reshape(-1, 1).astype(np.float32)
-        hidden_states = locals_["self"]._last_hidden_state
-        agent = locals_["self"].agent
-        n_env = locals_["self"].env.num_envs
-
-        if np.sum(dones) > 0:
-            reset_states = agent.init_hidden_state(n_env)
-            for name, hidden_state in hidden_states.items():
-                hidden_states[name] = hidden_state * (1 - dones) + reset_states[name] * dones
-
-
-class RecurrentRolloutCollector(RolloutCollector):
-
-    def __init__(self,
-                 env: VecEnv,
-                 buffer: BaseBuffer,
-                 agent: BaseAgent,
-                 logger: DataLogger,
-                 callbacks: Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]] = None):
-        reset_callback = HiddenResetCallback()
-        if callbacks is None:
-            callbacks = []
-        if not isinstance(callbacks, (list, tuple)):
-            callbacks = [callbacks]
-        callbacks = [reset_callback, *callbacks]
-
-        super().__init__(env, buffer, agent, logger, callbacks)
-        self._last_hidden_state = self.agent.init_hidden_state(batch_size=env.num_envs)
-
-    def get_actions(self):
-        actions, hidden_states, policy_context = self.agent.sample_action(
-            self._last_obs, self._last_hidden_state)
-        buffer_info = {**self._last_hidden_state,
-                       **{f"next_{key}": value for key, value in hidden_states.items()}}
-        self._last_hidden_state = hidden_states
-        for name in buffer_info.keys():
-            if name in policy_context.keys():
-                raise RuntimeError("Policy context conflicts with hidden state keys")
-        policy_context.update(buffer_info)
-        return actions, policy_context

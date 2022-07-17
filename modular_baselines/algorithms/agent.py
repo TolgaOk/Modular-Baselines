@@ -17,10 +17,6 @@ class BaseAgent(Component):
         super().__init__(logger)
 
     @abstractmethod
-    def init_hidden_state(self, batch_size: Optional[int] = None) -> Any:
-        pass
-
-    @abstractmethod
     def sample_action(self,
                       observation: np.ndarray,
                       policy_state: Union[np.ndarray, None],
@@ -49,17 +45,24 @@ class BaseAgent(Component):
         pass
 
 
+class BaseRecurrentAgent(Component):
+
+    @abstractmethod
+    def init_hidden_state(self, batch_size: Optional[int] = None) -> Any:
+        pass
+
+
 def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
-    def nested_wrapper(self, collection: Union[np.ndarray, Dict[str, Any]]):
+    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any]]):
         if isinstance(collection, dict):
-            return {name: nested_wrapper(self, value) for name, value in collection.items()}
+            return {name: nested_apply(self, value) for name, value in collection.items()}
         if isinstance(collection, (list, tuple)):
             cls = type(collection)
-            return cls([nested_wrapper(self, value) for value in collection])
+            return cls([nested_apply(self, value) for value in collection])
         if isinstance(collection, (torch.Tensor, np.ndarray)):
             return function(self, collection)
         raise ValueError(f"Type {type(collection)} is not supported!")
-    return nested_wrapper
+    return nested_apply
 
 
 class TorchAgent(BaseAgent):
@@ -91,3 +94,8 @@ class TorchAgent(BaseAgent):
     def flatten_time(self, tensor: torch.Tensor) -> torch.Tensor:
         n_envs, n_rollout = tensor.shape[:2]
         return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
+
+    def param_dict_as_numpy(self) -> Dict[str, np.ndarray]:
+        return {name: param.detach().cpu().numpy()
+                for name, param in self.policy.named_parameters()}
+            

@@ -56,7 +56,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
     vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
 
     policy = network(observation_space=vecenv.observation_space,
-                                    action_space=vecenv.action_space)
+                     action_space=vecenv.action_space)
     policy.to(config.device)
     optimizer = torch.optim.Adam(policy.parameters(), eps=1e-5)
     agent = agent_cls(policy,

@@ -105,6 +105,32 @@ class SeparateFeatureNetwork(BaseNetwork):
         return logits, value
 
 
+class LSTMNetwork(torch.nn.Module):
+
+    def __init__(self, in_size: int, out_size: int, hidden_size: int = 64, last_layer_std: float = 1.0):
+        super().__init__()
+        self.in_size = in_size
+        self.out_size = out_size
+        self.hidden_size = hidden_size
+        self.last_layer_std = last_layer_std
+
+        self.in_layer = linear_layer_init(torch.nn.Linear(self.in_size, hidden_size))
+        self.lstm = lstm_init(torch.nn.LSTMCell(hidden_size, hidden_size))
+        self.out = linear_layer_init(
+            torch.nn.Linear(hidden_size, self.out_size),
+            std=last_layer_std)
+
+    def forward(self,
+                state: torch.Tensor,
+                hidden_state: Tuple[torch.Tensor, torch.Tensor],
+                ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+            
+        features = torch.tanh(self.in_layer(state))
+        hx, cx = self.lstm(features, hidden_state)
+        output = self.out(hx)
+        return output, (hx, cx)
+
+
 class LSTMSeparateNetwork(BaseNetwork):
 
     def __init__(self, observation_space: Space, action_space: Space, policy_hidden_size: int = 64, value_hidden_size: int = 64):
@@ -113,15 +139,8 @@ class LSTMSeparateNetwork(BaseNetwork):
         self.policy_hidden_size = policy_hidden_size
         self.value_hidden_size = value_hidden_size
 
-        self.policy_in_layer = linear_layer_init(torch.nn.Linear(self.in_size, policy_hidden_size))
-        self.policy_lstm = lstm_init(torch.nn.LSTMCell(policy_hidden_size, policy_hidden_size))
-        self.policy_out = linear_layer_init(torch.nn.Linear(
-            policy_hidden_size, self.out_size), std=0.01)
-
-        self.value_in_layer = linear_layer_init(torch.nn.Linear(self.in_size, value_hidden_size))
-        self.value_lstm = lstm_init(torch.nn.LSTMCell(value_hidden_size, value_hidden_size))
-        self.value_out = linear_layer_init(torch.nn.Linear(
-            value_hidden_size, 1), std=1.0)
+        self.policy_network = LSTMNetwork(self.in_size, self.out_size, policy_hidden_size, 0.01)
+        self.value_network = LSTMNetwork(self.in_size, 1, value_hidden_size, 1.0)
 
     @property
     def hidden_state_info(self) -> Dict[str, int]:
@@ -138,13 +157,8 @@ class LSTMSeparateNetwork(BaseNetwork):
         policy_hx, policy_cx = hidden_states["policy_hx"], hidden_states["policy_cx"]
         value_hx, value_cx = hidden_states["value_hx"], hidden_states["value_cx"]
 
-        policy_features = torch.tanh(self.policy_in_layer(state))
-        policy_hx, policy_cx = self.policy_lstm(policy_features, (policy_hx, policy_cx))
-        policy_logit = self.policy_out(policy_hx)
-
-        value_features = torch.tanh(self.value_in_layer(state))
-        value_hx, value_cx = self.value_lstm(value_features, (value_hx, value_cx))
-        value = self.value_out(value_hx)
+        policy_logit, (policy_hx, policy_cx) = self.policy_network(state, (policy_hx, policy_cx))
+        value, (value_hx, value_cx) = self.value_network(state, (value_hx, value_cx))
 
         hidden_states = dict(value_hx=value_hx, value_cx=value_cx,
                              policy_hx=policy_hx, policy_cx=policy_cx)

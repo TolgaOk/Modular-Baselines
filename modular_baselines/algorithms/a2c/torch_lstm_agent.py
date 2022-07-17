@@ -6,10 +6,11 @@ from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.a2c.torch_agent import TorchA2CAgent
+from modular_baselines.algorithms.agent import BaseRecurrentAgent
 from modular_baselines.loggers.data_logger import ListLog
 
 
-class TorchLSTMA2CAgent(TorchA2CAgent):
+class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
 
     def init_hidden_state(self, batch_size: int) -> Dict[str, np.ndarray]:
         return {name: np.zeros((batch_size, size), dtype=np.float32)

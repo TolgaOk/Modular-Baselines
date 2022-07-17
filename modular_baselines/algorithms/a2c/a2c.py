@@ -4,7 +4,8 @@ import numpy as np
 from dataclasses import dataclass
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from modular_baselines.collectors.collector import RolloutCollector, RecurrentRolloutCollector, BaseCollectorCallback
+from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
+from modular_baselines.collectors.recurrent import RecurrentRolloutCollector
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.agent import BaseAgent

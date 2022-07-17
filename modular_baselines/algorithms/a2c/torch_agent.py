@@ -12,9 +12,6 @@ from modular_baselines.loggers.data_logger import ListLog
 class TorchA2CAgent(TorchAgent):
     """ Pytorch A2C Agent """
 
-    def init_hidden_state(self, batch_size=None) -> None:
-        return None
-
     def sample_action(self,
                       observation: np.ndarray,
                       ) -> Tuple[np.ndarray, Union[np.ndarray, None], Dict[str, Any]]:
@@ -48,12 +45,12 @@ class TorchA2CAgent(TorchAgent):
         tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
         _, th_next_value = self.policy(th_next_obs)
         advantages, returns = self.to_torch(calculate_gae(
-                rewards=sample["reward"],
-                terminations=sample["termination"],
-                values=tf_values.detach().cpu().numpy(),
-                last_value=th_next_value.detach().cpu().numpy(),
-                gamma=gamma,
-                gae_lambda=gae_lambda)
+            rewards=sample["reward"],
+            terminations=sample["termination"],
+            values=tf_values.detach().cpu().numpy(),
+            last_value=th_next_value.detach().cpu().numpy(),
+            gamma=gamma,
+            gae_lambda=gae_lambda)
         )
 
         return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
