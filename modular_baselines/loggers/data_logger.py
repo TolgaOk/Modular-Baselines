@@ -4,9 +4,9 @@ import numpy as np
 
 class DataLog():
 
-    def __init__(self, formatting: Optional[Callable[[Any], str]] = None) -> None:
+    def __init__(self, apply: Optional[Callable[[Any], str]] = None) -> None:
         self.value = None
-        self.formatting = formatting
+        self.apply = apply
 
     def push(self, value: Any) -> None:
         self.value = value
@@ -14,14 +14,14 @@ class DataLog():
     def dump(self) -> Any:
         value = self.value
         self.value = None
-        return value
+        return self.apply(value)
 
 
 class ListLog(DataLog):
 
-    def __init__(self, formatting: Optional[Callable[[List[Any]], str]] = None) -> None:
+    def __init__(self, apply: Optional[Callable[[List[Any]], str]] = None) -> None:
         self.values = []
-        self.formatting = formatting
+        self.apply = apply
 
     def push(self, value: Any) -> None:
         self.values.append(value)
@@ -29,10 +29,7 @@ class ListLog(DataLog):
     def dump(self) -> List[Any]:
         values = self.values
         self.values = []
-        return values
-
-    def _reduce(self, reduction_fn: Callable[[List[Any]], Any]) -> Any:
-        return reduction_fn(self.value)
+        return self.apply(values)
 
 
 class QueueLog(DataLog):

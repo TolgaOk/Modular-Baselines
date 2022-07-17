@@ -132,11 +132,11 @@ class TorchPPOAgent(TorchAgent):
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = dict(
-            value_loss=ListLog(formatting=lambda values: np.mean(values)),
-            policy_loss=ListLog(formatting=lambda values: np.mean(values)),
-            entropy_loss=ListLog(formatting=lambda values: np.mean(values)),
-            learning_rate=ListLog(formatting=lambda values: np.max(values)),
-            clip_range=ListLog(formatting=lambda values: np.max(values)),
-            approxkl=ListLog(formatting=lambda values: np.mean(values)),
+            value_loss=ListLog(apply=lambda values: np.mean(values)),
+            policy_loss=ListLog(apply=lambda values: np.mean(values)),
+            entropy_loss=ListLog(apply=lambda values: np.mean(values)),
+            learning_rate=ListLog(apply=lambda values: np.max(values)),
+            clip_range=ListLog(apply=lambda values: np.max(values)),
+            approxkl=ListLog(apply=lambda values: np.mean(values)),
         )
         self.logger.add_if_not_exists(loggers)

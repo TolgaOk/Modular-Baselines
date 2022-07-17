@@ -108,9 +108,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         
     def _init_default_loggers(self) -> None:
         loggers = {
-            "scalar/algorithm/iteration": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/timesteps": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/time_elapsed": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/fps": ListLog(formatting=lambda values: int(1 / np.mean(values))),
+            "scalar/algorithm/iteration": DataLog(apply=lambda value: value),
+            "scalar/algorithm/timesteps": DataLog(apply=lambda value: value),
+            "scalar/algorithm/time_elapsed": DataLog(apply=lambda value: value),
+            "scalar/algorithm/fps": ListLog(apply=lambda values: int(1 / np.mean(values))),
         }
         self.logger.add_if_not_exists(loggers)

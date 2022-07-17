@@ -39,7 +39,7 @@ class ScalarWriter(BaseWriter):
                 name_pieces = name.split("/")
                 name = "/".join(name_pieces[1:])
                 if name_pieces[0] == "scalar":
-                    self.sb3_logger.record(name, data_log.formatting(data_log.dump()))
+                    self.sb3_logger.record(name, data_log.dump())
             self.sb3_logger.dump()
 
     def write_historgram(self, histgoram_data: Dict[str, Dict[str, List[Union[float, int]]]]) -> None:

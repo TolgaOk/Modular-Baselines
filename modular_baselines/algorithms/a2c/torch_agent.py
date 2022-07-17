@@ -105,10 +105,10 @@ class TorchA2CAgent(TorchAgent):
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = {
-            "scalar/agent/value_loss": ListLog(formatting=lambda value: np.mean(value)),
-            "scalar/agent/policy_loss": ListLog(formatting=lambda value: np.mean(value)),
-            "scalar/agent/entropy_loss": ListLog(formatting=lambda value: np.mean(value)),
-            "scalar/agent/learning_rate": ListLog(formatting=lambda values: np.max(values)),
+            "scalar/agent/value_loss": ListLog(apply=lambda value: np.mean(value)),
+            "scalar/agent/policy_loss": ListLog(apply=lambda value: np.mean(value)),
+            "scalar/agent/entropy_loss": ListLog(apply=lambda value: np.mean(value)),
+            "scalar/agent/learning_rate": ListLog(apply=lambda values: np.max(values)),
             "histogram/params": HistLog(n_bins=15),
         }
         self.logger.add_if_not_exists(loggers)
