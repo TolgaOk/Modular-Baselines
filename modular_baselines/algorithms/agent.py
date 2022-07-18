@@ -1,4 +1,4 @@
-from typing import Optional, Any, Dict, Tuple, Union
+from typing import Optional, Any, Dict, Tuple, Union, List, Callable
 from abc import ABC, abstractmethod
 import numpy as np
 from torch.types import Device
@@ -15,10 +15,6 @@ class BaseAgent(Component):
         self.observation_space = observation_space
         self.action_space = action_space
         super().__init__(logger)
-
-    @abstractmethod
-    def init_hidden_state(self, batch_size: Optional[int] = None) -> Any:
-        pass
 
     @abstractmethod
     def sample_action(self,
@@ -49,6 +45,26 @@ class BaseAgent(Component):
         pass
 
 
+class BaseRecurrentAgent(Component):
+
+    @abstractmethod
+    def init_hidden_state(self, batch_size: Optional[int] = None) -> Any:
+        pass
+
+
+def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
+    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any]]):
+        if isinstance(collection, dict):
+            return {name: nested_apply(self, value) for name, value in collection.items()}
+        if isinstance(collection, (list, tuple)):
+            cls = type(collection)
+            return cls([nested_apply(self, value) for value in collection])
+        if isinstance(collection, (torch.Tensor, np.ndarray)):
+            return function(self, collection)
+        raise ValueError(f"Type {type(collection)} is not supported!")
+    return nested_apply
+
+
 class TorchAgent(BaseAgent):
 
     def __init__(self, policy: torch.nn.Module,
@@ -64,23 +80,22 @@ class TorchAgent(BaseAgent):
     def device(self) -> Device:
         return next(iter(self.policy.parameters())).device
 
-    def init_hidden_state(self, batch_size=None) -> None:
-        return None
-
     def train_mode(self):
         self.policy.train(True)
 
     def eval_mode(self):
         self.policy.train(False)
 
-    def maybe_to_torch(self, ndarray: np.ndarray):
-        return torch.from_numpy(ndarray).to(self.device) if ndarray is not None else None
+    @nested
+    def to_torch(self, ndarray: np.ndarray):
+        return torch.from_numpy(ndarray).to(self.device)
 
-    def maybe_flatten_batch(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        if tensor is not None:
-            n_envs, n_rollout = tensor.shape[:2]
-            return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
-        return None
+    @nested
+    def flatten_time(self, tensor: torch.Tensor) -> torch.Tensor:
+        n_envs, n_rollout = tensor.shape[:2]
+        return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
 
-    def maybe_take_last_time(self, tensor: Union[torch.Tensor, None]) -> Union[torch.Tensor, None]:
-        return tensor[:, -1] if tensor is not None else None
+    def param_dict_as_numpy(self) -> Dict[str, np.ndarray]:
+        return {name: param.detach().cpu().numpy()
+                for name, param in self.policy.named_parameters()}
+            

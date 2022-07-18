@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Dict, Generator, Any
+from typing import Tuple, Union, Dict, Generator, Any, List
 from abc import abstractmethod
 import numpy as np
 import torch
@@ -6,7 +6,7 @@ from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.agent import TorchAgent
-from modular_baselines.loggers.data_logger import ListLog
+from modular_baselines.loggers.data_logger import ListDataLog, ParamHistDataLog
 
 
 class TorchA2CAgent(TorchAgent):
@@ -14,31 +14,46 @@ class TorchA2CAgent(TorchAgent):
 
     def sample_action(self,
                       observation: np.ndarray,
-                      policy_state: Union[np.ndarray, None],
                       ) -> Tuple[np.ndarray, Union[np.ndarray, None], Dict[str, Any]]:
 
         with torch.no_grad():
-            th_observation = self.maybe_to_torch(observation).float()
-            th_policy_state = self.maybe_to_torch(policy_state)
-            th_policy_state = th_policy_state.float() if th_policy_state is not None else None
+            th_observation = self.to_torch(observation).float()
 
-            policy_dist, policy_state, _ = self.policy(th_observation, th_policy_state)
+            policy_params, _ = self.policy(th_observation)
+            policy_dist = self.policy.dist(policy_params)
             th_action = policy_dist.sample()
             if isinstance(self.action_space, Discrete):
                 th_action = th_action.unsqueeze(-1)
-        return th_action.cpu().numpy(), policy_state, {}
+        return th_action.cpu().numpy(), {}
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
-        next_policy_state = sample["next_policy_state"] if "next_policy_state" in sample.dtype.names else None
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = [
-            self.maybe_to_torch(array) for array in
+        th_obs, th_action, th_next_obs = [
+            self.to_torch(array) for array in
             (sample["observation"],
-             policy_state,
              sample["action"],
-             self.maybe_take_last_time(sample["next_observation"]),
-             self.maybe_take_last_time(next_policy_state))]
-        return th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state
+             sample["next_observation"][:, -1])]
+        return th_obs, th_action, th_next_obs
+
+    def replay_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
+        env_size, rollout_size = sample["observation"].shape[:2]
+        th_obs, th_action, th_next_obs = self.rollout_to_torch(
+            sample)
+
+        policy_params, th_flatten_values = self.policy(self.flatten_time(th_obs))
+        policy_dist = self.policy.dist(policy_params)
+
+        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
+        _, th_next_value = self.policy(th_next_obs)
+        advantages, returns = self.to_torch(calculate_gae(
+            rewards=sample["reward"],
+            terminations=sample["termination"],
+            values=tf_values.detach().cpu().numpy(),
+            last_value=th_next_value.detach().cpu().numpy(),
+            gamma=gamma,
+            gae_lambda=gae_lambda)
+        )
+
+        return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
 
     def update_parameters(self,
                           sample: np.ndarray,
@@ -56,31 +71,15 @@ class TorchA2CAgent(TorchAgent):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state = self.rollout_to_torch(
-            sample)
+        advantages, returns, th_action, policy_dist, th_values = self.replay_rollout(
+            sample, gamma=gamma, gae_lambda=gae_lambda)
 
-        policy_dist, _, th_flatten_values = self.policy(
-            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
-        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
-
-        advantages, returns = map(
-            self.maybe_to_torch,
-            calculate_gae(
-                rewards=sample["reward"],
-                terminations=sample["termination"],
-                values=tf_values.detach().cpu().numpy(),
-                last_value=th_next_values.detach().cpu().numpy(),
-                gamma=gamma,
-                gae_lambda=gae_lambda)
-        )
-
-        log_probs = policy_dist.log_prob(self.maybe_flatten_batch(th_action))
+        log_probs = policy_dist.log_prob((th_action))
         entropies = policy_dist.entropy()
 
         values, advantages, returns, log_probs, entropies = map(
             lambda tensor: tensor.reshape(env_size * rollout_size, 1),
-            (tf_values, advantages, returns, log_probs, entropies))
+            (th_values, advantages, returns, log_probs, entropies))
 
         if normalize_advantage:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -95,19 +94,21 @@ class TorchA2CAgent(TorchAgent):
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
         self.optimizer.step()
 
-        self.logger.value_loss.push(value_loss.item())
-        self.logger.policy_loss.push(policy_loss.item())
-        self.logger.entropy_loss.push(entropy_loss.item())
-        self.logger.learning_rate.push(lr)
+        getattr(self.logger, "scalar/agent/value_loss").push(value_loss.item())
+        getattr(self.logger, "scalar/agent/policy_loss").push(policy_loss.item())
+        getattr(self.logger, "scalar/agent/entropy_loss").push(entropy_loss.item())
+        getattr(self.logger, "scalar/agent/learning_rate").push(lr)
+        getattr(self.logger, "histogram/params").push(self.param_dict_as_numpy)
 
         return dict()
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
-        loggers = dict(
-            value_loss=ListLog(formatting=lambda value: np.mean(value)),
-            policy_loss=ListLog(formatting=lambda value: np.mean(value)),
-            entropy_loss=ListLog(formatting=lambda value: np.mean(value)),
-            learning_rate=ListLog(formatting=lambda values: np.max(values)),
-        )
+        loggers = {
+            "scalar/agent/value_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/policy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/entropy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/learning_rate": ListDataLog(reduce_fn=lambda values: np.max(values)),
+            "histogram/params": ParamHistDataLog(n_bins=15),
+        }
         self.logger.add_if_not_exists(loggers)

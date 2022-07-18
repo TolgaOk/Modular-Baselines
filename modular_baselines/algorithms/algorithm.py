@@ -6,7 +6,7 @@ import numpy as np
 from modular_baselines.component import Component
 from modular_baselines.collectors.collector import BaseCollector
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.data_logger import DataLogger, DataLog, ListLog
+from modular_baselines.loggers.data_logger import DataLogger, LastDataLog, ListDataLog
 
 
 class BaseAlgorithmCallback(ABC):
@@ -93,10 +93,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             self.train()
             iteration += 1
 
-            self.logger.iteration.push(iteration)
-            self.logger.timesteps.push(num_timesteps)
-            self.logger.time_elapsed.push(time() - train_start_time)
-            self.logger.fps.push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
+            getattr(self.logger, "scalar/algorithm/iteration").push(iteration)
+            getattr(self.logger, "scalar/algorithm/timesteps").push(num_timesteps)
+            getattr(self.logger, "scalar/algorithm/time_elapsed").push(time() - train_start_time)
+            getattr(self.logger, "scalar/algorithm/fps").push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
 
             for callback in self.callbacks:
                 callback.on_step(locals())
@@ -107,10 +107,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         return None
         
     def _init_default_loggers(self) -> None:
-        loggers = dict(
-            iteration = DataLog(formatting=lambda value: value),
-            timesteps = DataLog(formatting=lambda value: value),
-            time_elapsed = DataLog(formatting=lambda value: value),
-            fps = ListLog(formatting=lambda values: int(1 / np.mean(values))),
-        )
+        loggers = {
+            "scalar/algorithm/iteration": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/timesteps": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/time_elapsed": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/fps": ListDataLog(reduce_fn=lambda values: int(1 / np.mean(values))),
+        }
         self.logger.add_if_not_exists(loggers)

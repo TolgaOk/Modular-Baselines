@@ -136,7 +136,7 @@ class HistRender():
             title=self.layer_name,
             yaxis={
                 "title": "Density",
-                "range": [-1, self.hist_offset * len(fig_data) * 1.5],
+                # "range": [-1, self.hist_offset * len(fig_data) * 1.5],
             },
             xaxis={
                 "title": "Values"
