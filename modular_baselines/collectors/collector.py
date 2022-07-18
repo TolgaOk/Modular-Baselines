@@ -79,7 +79,7 @@ class RolloutCollector(BaseCollector):
         loggers = {
             "scalar/collector/env_reward": ListDataLog(reduce_fn=lambda values: np.mean(values)),
             "scalar/collector/env_length": ListDataLog(reduce_fn=lambda values: np.mean(values)),
-            "histogram/actions": HistListDataLog(n_bins=10, reduce_fn=lambda values: {"action": np.stack(values)}),
+            "dict/histogram/actions": HistListDataLog(n_bins=10, reduce_fn=lambda values: {"action": np.stack(values)}),
         }
         self.logger.add_if_not_exists(loggers)
 
@@ -130,7 +130,7 @@ class RolloutCollector(BaseCollector):
                     getattr(self.logger, "scalar/collector/env_reward").push(maybe_ep_info["r"])
                     getattr(self.logger, "scalar/collector/env_length").push(maybe_ep_info["l"])
             # Logging actions for histogram
-            getattr(self.logger, "histogram/actions").push(actions)
+            getattr(self.logger, "dict/histogram/actions").push(actions)
 
             self._last_obs = new_obs
 

@@ -1,5 +1,6 @@
 from typing import Tuple, Union, Dict, Generator, Any, List
 from abc import abstractmethod
+from functools import partial
 import numpy as np
 import torch
 from gym.spaces import Discrete
@@ -7,6 +8,7 @@ from gym.spaces import Discrete
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.a2c.torch_agent import TorchA2CAgent
 from modular_baselines.algorithms.agent import BaseRecurrentAgent
+from modular_baselines.loggers.data_logger import SequenceNormDataLog
 
 
 class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
@@ -52,7 +54,16 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
         values = []
         th_reset_state = self.to_torch(self.init_hidden_state(env_size))
         th_hidden_state = {name: tensor[:, 0] for name, tensor in th_hidden_states.items()}
+
         for step in range(rollout_size):
+
+            # Log gradient of hidden states at each step
+            for name, hidden in th_hidden_state.items():
+                hidden.requires_grad = True
+                hidden.register_hook(
+                    partial(lambda time, grad:
+                            getattr(self.logger, f"dict/time_sequence/grad_{name}").add(
+                                time, grad.norm(dim=-1, p="fro").mean(0).item()), step))
 
             # Checking for consistency
             for name, hidden_tensor in th_hidden_states.items():
@@ -60,7 +71,6 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
                     raise RuntimeError("Sampled and calculated hidden states are not matched!")
 
             policy_param, value, th_hidden_state = self.policy(th_obs[:, step], th_hidden_state)
-            # policy_param, value, th_hidden_state = self.policy(th_obs[:, step], {name: tensor.detach() for name, tensor in th_hidden_state.items()})
             policy_params.append(policy_param)
             values.append(value)
 
@@ -72,7 +82,8 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
 
             th_done = th_dones[:, step]
             for name, tensor in th_hidden_state.items():
-                th_hidden_state[name] = (tensor * (1 - th_done) + th_reset_state[name] * th_done).detach() 
+                th_hidden_state[name] = (tensor * (1 - th_done) +
+                                         th_reset_state[name] * th_done).detach()
 
         th_values = torch.stack(values, dim=1)
         th_flatten_values = self.flatten_time(th_values)
@@ -80,13 +91,15 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
         policy_dist = self.policy.dist(policy_params)
 
         # Checking for value consistency
-        test_policy_parameters, test_values, _ = self.policy(*self.flatten_time([th_obs, th_hidden_states])) 
+        test_policy_parameters, test_values, _ = self.policy(
+            *self.flatten_time([th_obs, th_hidden_states]))
         if not torch.allclose(th_flatten_values, test_values):
             raise RuntimeError("Value mismatch")
         if not torch.allclose(policy_params, test_policy_parameters):
             raise RuntimeError("Policy dist parameters mismatch")
 
-        _, th_next_value, _ = self.policy(th_next_obs, {name: tensor[:, -1] for name, tensor in th_next_hidden_state.items()})
+        _, th_next_value, _ = self.policy(
+            th_next_obs, {name: tensor[:, -1] for name, tensor in th_next_hidden_state.items()})
         advantages, returns = self.to_torch(calculate_gae(
             rewards=sample["reward"],
             terminations=sample["termination"],
@@ -97,3 +110,11 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
         )
 
         return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
+
+    def _init_default_loggers(self) -> None:
+        super()._init_default_loggers()
+        loggers = {
+            f"dict/time_sequence/grad_{name}": SequenceNormDataLog()
+            for name in self.policy.hidden_state_info.keys()
+        }
+        self.logger.add_if_not_exists(loggers)
