@@ -7,7 +7,6 @@ from gym.spaces import Discrete
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.a2c.torch_agent import TorchA2CAgent
 from modular_baselines.algorithms.agent import BaseRecurrentAgent
-from modular_baselines.loggers.data_logger import ListLog
 
 
 class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
@@ -98,5 +97,3 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
         )
 
         return (*self.flatten_time([advantages, returns, th_action]), policy_dist, th_flatten_values)
-
-

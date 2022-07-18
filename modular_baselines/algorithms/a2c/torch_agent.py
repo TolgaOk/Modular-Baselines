@@ -6,7 +6,7 @@ from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.agent import TorchAgent
-from modular_baselines.loggers.data_logger import ListLog, HistLog
+from modular_baselines.loggers.data_logger import ListDataLog, ParamHistDataLog
 
 
 class TorchA2CAgent(TorchAgent):
@@ -105,10 +105,10 @@ class TorchA2CAgent(TorchAgent):
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = {
-            "scalar/agent/value_loss": ListLog(apply=lambda value: np.mean(value)),
-            "scalar/agent/policy_loss": ListLog(apply=lambda value: np.mean(value)),
-            "scalar/agent/entropy_loss": ListLog(apply=lambda value: np.mean(value)),
-            "scalar/agent/learning_rate": ListLog(apply=lambda values: np.max(values)),
-            "histogram/params": HistLog(n_bins=15),
+            "scalar/agent/value_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/policy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/entropy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
+            "scalar/agent/learning_rate": ListDataLog(reduce_fn=lambda values: np.max(values)),
+            "histogram/params": ParamHistDataLog(n_bins=15),
         }
         self.logger.add_if_not_exists(loggers)
