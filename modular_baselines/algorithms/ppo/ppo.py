@@ -81,24 +81,7 @@ class PPO(OnPolicyAlgorithm):
               algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                                   BaseAlgorithmCallback]] = None,
               ) -> "PPO":
-        # TODO: Add different observation spaces
-        observation_space = env.observation_space
-        # TODO: Add different action spaces
-        action_space = env.action_space
-
-        if not isinstance(observation_space, spaces.Box):
-            raise NotImplementedError("Only Box observations are available")
-        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
-            raise NotImplementedError("Only Discrete and Box actions are available")
-        policy_states_dtype = []
-        # Check for recurrent policy
-        policy_state = agent.init_hidden_state()
-        if policy_state is not None:
-            policy_states_dtype = [
-                ("policy_state", np.float32, policy_state.shape),
-                ("next_policy_state", np.float32, policy_state.shape)
-            ]
-        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+        observation_space, action_space, action_dim = PPO._setup(env)
 
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
@@ -107,7 +90,6 @@ class PPO(OnPolicyAlgorithm):
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             ("old_log_prob", np.float32, (1,)),
-            *policy_states_dtype
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)

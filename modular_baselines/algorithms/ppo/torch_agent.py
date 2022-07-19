@@ -7,7 +7,7 @@ from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.algorithms.agent import TorchAgent
-from modular_baselines.loggers.data_logger import ListLog
+from modular_baselines.loggers.data_logger import ListDataLog
 
 
 class TorchPPOAgent(TorchAgent):
@@ -15,65 +15,62 @@ class TorchPPOAgent(TorchAgent):
 
     def sample_action(self,
                       observation: np.ndarray,
-                      policy_state: Union[np.ndarray, None],
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         with torch.no_grad():
-            th_observation = self.maybe_to_torch(observation).float()
-            th_policy_state = self.maybe_to_torch(policy_state)
-            th_policy_state = th_policy_state.float() if th_policy_state is not None else None
+            th_observation = self.to_torch(observation).float()
 
-            policy_dist, policy_state, value = self.policy(th_observation, th_policy_state)
+            policy_params, _ = self.policy(th_observation)
+            policy_dist = self.policy.dist(policy_params)
             th_action = policy_dist.sample()
             log_prob = policy_dist.log_prob(th_action).unsqueeze(-1)
             if isinstance(self.action_space, Discrete):
-                th_action = th_action.unsqueeze(-1)
-        return th_action.cpu().numpy(), policy_state, {"old_log_prob": log_prob.cpu().numpy()}
+                # th_action = th_action.unsqueeze(-1)
+                raise NotImplementedError(
+                    f"Unsupported action space distribution {self.action_space.__class__.__name__}!")
+        return th_action.cpu().numpy(), {"old_log_prob": log_prob.cpu().numpy()}
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        policy_state = sample["policy_state"] if "policy_state" in sample.dtype.names else None
-        next_policy_state = sample["next_policy_state"] if "next_policy_state" in sample.dtype.names else None
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state, th_old_log_prob = [
-            self.maybe_to_torch(array) for array in
+        th_obs, th_action, th_next_obs, th_old_log_prob = [
+            self.to_torch(array) for array in
             (sample["observation"],
-             policy_state,
              sample["action"],
-             self.maybe_take_last_time(sample["next_observation"]),
-             self.maybe_take_last_time(next_policy_state),
+             sample["next_observation"][:, -1],
              sample["old_log_prob"])]
-        return th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state, th_old_log_prob
+        return th_obs, th_action, th_next_obs, th_old_log_prob
 
     def prepare_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
         env_size, rollout_size = sample["observation"].shape[:2]
-        th_obs, th_policy_state, th_action, th_next_obs, th_next_policy_state, th_old_log_prob = self.rollout_to_torch(
-            sample)
+        th_obs, th_action, th_next_obs, th_old_log_prob = self.rollout_to_torch(sample)
 
-        _, _, th_flatten_values = self.policy(
-            *map(self.maybe_flatten_batch, (th_obs, th_policy_state)))
-        tf_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, _, th_next_values = self.policy(th_next_obs, th_next_policy_state)
+        _, th_flatten_values = self.policy(self.flatten_time(th_obs))
+        th_values = th_flatten_values.reshape(env_size, rollout_size, 1)
+        _, th_next_value = self.policy(th_next_obs)
 
-        advantages, returns = map(
-            self.maybe_to_torch,
-            calculate_gae(
-                rewards=sample["reward"],
-                terminations=sample["termination"],
-                values=tf_values.detach().cpu().numpy(),
-                last_value=th_next_values.detach().cpu().numpy(),
-                gamma=gamma,
-                gae_lambda=gae_lambda)
+        advantages, returns = self.to_torch(calculate_gae(
+            rewards=sample["reward"],
+            terminations=sample["termination"],
+            values=th_values.detach().cpu().numpy(),
+            last_value=th_next_value.detach().cpu().numpy(),
+            gamma=gamma,
+            gae_lambda=gae_lambda)
         )
 
-        return list(map(self.maybe_flatten_batch,
-                        (advantages, returns, th_obs, th_policy_state, th_action, th_old_log_prob)))
+        return (advantages, returns, th_obs, th_action, th_old_log_prob)
 
-    def rollout_loader(self, batch_size: int, *tensors: Tuple[torch.Tensor]) -> Generator[Tuple[torch.Tensor], None, None]:
+    def rollout_loader(self, batch_size: int, *tensors: Tuple[torch.Tensor]
+                       ) -> Generator[Tuple[torch.Tensor], None, None]:
         if len(tensors) == 0:
             raise ValueError("Empty tensors")
-        perm_indices = torch.randperm(tensors[0].shape[0])
+        flatten_tensors = [self.flatten_time(tensor) for tensor in tensors]
+        perm_indices = torch.randperm(flatten_tensors[0].shape[0])
         for index in range(0, len(perm_indices), batch_size):
             _slice = slice(index, index + batch_size)
-            yield tuple([tensor[_slice] if tensor is not None else None for tensor in tensors])
+            yield tuple([tensor[_slice] if tensor is not None else None for tensor in flatten_tensors])
+
+    def replay_rollout(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        policy_params, values = self.policy(obs)
+        return policy_params, values
 
     def update_parameters(self,
                           sample: np.ndarray,
@@ -95,14 +92,17 @@ class TorchPPOAgent(TorchAgent):
         rollout_data = self.prepare_rollout(sample, gamma, gae_lambda)
 
         for epoch in range(epochs):
-            for advantages, returns, obs, policy_state, action, old_log_prob in self.rollout_loader(batch_size, *rollout_data):
+            for advantages, returns, obs, action, old_log_prob in self.rollout_loader(batch_size, *rollout_data):
 
                 if normalize_advantage:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-                policy_dist, _, values = self.policy(obs, policy_state)
+                policy_params, values = self.replay_rollout(obs)
+                policy_dist = self.policy.dist(policy_params)
                 if isinstance(self.action_space, Discrete):
-                    action = action.squeeze(-1)
+                    # action = action.squeeze(-1)
+                    raise NotImplementedError(
+                        f"Unsupported action space distribution {self.action_space.__class__.__name__}!")
                 log_probs = policy_dist.log_prob(action).unsqueeze(-1)
                 entropies = policy_dist.entropy().unsqueeze(-1)
 
@@ -120,23 +120,23 @@ class TorchPPOAgent(TorchAgent):
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_grad_norm)
                 self.optimizer.step()
 
-                self.logger.value_loss.push(value_loss.item())
-                self.logger.policy_loss.push(policy_loss.item())
-                self.logger.entropy_loss.push(entropy_loss.item())
-                self.logger.approxkl.push(((ratio - 1) - ratio.log()).mean().item())
-        self.logger.clip_range.push(clip_value)
-        self.logger.learning_rate.push(lr)
+                getattr(self.logger, "scalar/agent/value_loss").push(value_loss.item())
+                getattr(self.logger, "scalar/agent/policy_loss").push(policy_loss.item())
+                getattr(self.logger, "scalar/agent/entropy_loss").push(entropy_loss.item())
+                getattr(self.logger, "scalar/agent/approxkl").push(((ratio - 1) - ratio.log()).mean().item())
+        getattr(self.logger, "scalar/agent/clip_range").push(clip_value)
+        getattr(self.logger, "scalar/agent/learning_rate").push(lr)
 
         return dict()
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
-        loggers = dict(
-            value_loss=ListLog(apply=lambda values: np.mean(values)),
-            policy_loss=ListLog(apply=lambda values: np.mean(values)),
-            entropy_loss=ListLog(apply=lambda values: np.mean(values)),
-            learning_rate=ListLog(apply=lambda values: np.max(values)),
-            clip_range=ListLog(apply=lambda values: np.max(values)),
-            approxkl=ListLog(apply=lambda values: np.mean(values)),
-        )
+        loggers = {
+            "scalar/agent/value_loss": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "scalar/agent/policy_loss": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "scalar/agent/entropy_loss": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "scalar/agent/learning_rate": ListDataLog(reduce_fn=lambda values: np.max(values)),
+            "scalar/agent/clip_range": ListDataLog(reduce_fn=lambda values: np.max(values)),
+            "scalar/agent/approxkl": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+        }
         self.logger.add_if_not_exists(loggers)

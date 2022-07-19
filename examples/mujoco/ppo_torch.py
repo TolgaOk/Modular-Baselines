@@ -3,13 +3,14 @@ from argparse import ArgumentParser
 
 from modular_baselines.algorithms.ppo.ppo import PPO, PPOArgs
 from modular_baselines.algorithms.ppo.torch_agent import TorchPPOAgent
+from modular_baselines.networks.network import SeparateFeatureNetwork
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 
 from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
 def ppo_setup(env_name: str, config: Dict[str, Any], seed: int):
-    return setup(PPO, TorchPPOAgent, env_name, config, seed)
+    return setup(PPO, TorchPPOAgent, SeparateFeatureNetwork, env_name, config, seed)
 
 
 ppo_mujoco_config = MujocoTorchConfig(
