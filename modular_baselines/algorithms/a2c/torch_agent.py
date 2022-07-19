@@ -98,7 +98,7 @@ class TorchA2CAgent(TorchAgent):
         getattr(self.logger, "scalar/agent/policy_loss").push(policy_loss.item())
         getattr(self.logger, "scalar/agent/entropy_loss").push(entropy_loss.item())
         getattr(self.logger, "scalar/agent/learning_rate").push(lr)
-        getattr(self.logger, "histogram/params").push(self.param_dict_as_numpy)
+        getattr(self.logger, "dict/histogram/params").push(self.param_dict_as_numpy)
 
         return dict()
 
@@ -109,6 +109,6 @@ class TorchA2CAgent(TorchAgent):
             "scalar/agent/policy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
             "scalar/agent/entropy_loss": ListDataLog(reduce_fn=lambda value: np.mean(value)),
             "scalar/agent/learning_rate": ListDataLog(reduce_fn=lambda values: np.max(values)),
-            "histogram/params": ParamHistDataLog(n_bins=15),
+            "dict/histogram/params": ParamHistDataLog(n_bins=15),
         }
         self.logger.add_if_not_exists(loggers)

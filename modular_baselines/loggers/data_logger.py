@@ -1,5 +1,6 @@
 from typing import Any, Callable, Dict, List, Optional, Union, Type, Tuple
 from abc import abstractmethod
+from collections import defaultdict
 import numpy as np
 
 
@@ -91,6 +92,7 @@ class HistListDataLog(ListDataLog, BaseHistogram):
         super().__init__(apply_fn, reduce_fn=lambda values: self.calculate_histogram(reduce_fn(values)))
         BaseHistogram.__init__(self, n_bins)
 
+
 class ParamHistDataLog(LastDataLog, BaseHistogram):
     FetchParamCallable = Callable[[], Dict[str, np.ndarray]]
     LogItem = FetchParamCallable
@@ -104,6 +106,28 @@ class ParamHistDataLog(LastDataLog, BaseHistogram):
                           ) -> BaseHistogram.HistogramData:
         params = fetch_param_fn()
         return self.calculate_histogram(params)
+
+
+class SequenceNormDataLog(BaseDataLog):
+
+    Scalar = Union[np.float32, np.float64, float]
+    InternalData = Dict[int, List[Scalar]]
+
+    def __init__(self,
+                 reduce_fn: Optional[BaseDataLog.ReduceCallableType] = None) -> None:
+        super().__init__(None, reduce_fn)
+        self.internal = defaultdict(list)
+
+    def add(self, time: int, value: Scalar) -> None:
+        self.internal[time].append(value)
+
+    @staticmethod
+    def _push(self, *args) -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def _dump(internal: defaultdict) -> Tuple[defaultdict, InternalData]:
+        return defaultdict(list), dict(internal)
 
 
 class BaseNormDataLog(BaseDataLog):

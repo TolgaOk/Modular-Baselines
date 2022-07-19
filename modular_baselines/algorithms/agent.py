@@ -72,9 +72,9 @@ class TorchAgent(BaseAgent):
                  observation_space: Space,
                  action_space: Space,
                  logger: DataLogger) -> None:
-        super().__init__(observation_space, action_space, logger)
         self.policy = policy
         self.optimizer = optimizer
+        super().__init__(observation_space, action_space, logger)
 
     @property
     def device(self) -> Device:

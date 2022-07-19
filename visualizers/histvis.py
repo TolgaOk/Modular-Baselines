@@ -32,7 +32,7 @@ class HistRender():
         if not os.path.exists(log_dir):
             raise FileNotFoundError("Logging directory does not exist")
 
-        self.hist_dir = os.path.join(log_dir, "hist")
+        self.hist_dir = os.path.join(log_dir, "histogram")
         if not os.path.exists(self.hist_dir):
             raise FileNotFoundError("No hist folder in the logging dir")
 
@@ -130,7 +130,7 @@ class HistRender():
                         width=0.4,
                         shape="spline",
                         smoothing=0.7)))
-
+        
         self.fig.add_traces(fig_data)
         self.fig.update_layout(
             title=self.layer_name,
