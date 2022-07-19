@@ -1,82 +1,163 @@
-from typing import Any, Callable, Dict, List, Optional, Union, Type
+from typing import Any, Callable, Dict, List, Optional, Union, Type, Tuple
+from abc import abstractmethod
+from collections import defaultdict
 import numpy as np
 
 
-class DataLog():
+class BaseDataLog():
 
-    def __init__(self, formatting: Optional[Callable[[Any], str]] = None) -> None:
-        self.value = None
-        self.formatting = formatting
+    ApplyCallableType = Callable[[Any], Any]
+    ReduceCallableType = Callable[[Any], Any]
+    LogItem = Any
 
-    def push(self, value: Any) -> None:
-        self.value = value
+    def __init__(self,
+                 apply_fn: Optional[ApplyCallableType] = None,
+                 reduce_fn: Optional[ReduceCallableType] = None
+                 ) -> None:
+        self.internal = None
+        self.apply_fn = apply_fn if apply_fn is not None else lambda x: x
+        self.reduce_fn = reduce_fn if reduce_fn is not None else lambda x: x
+
+    def push(self, value: LogItem) -> None:
+        self.internal = self._push(self.internal, self.apply_fn(value))
 
     def dump(self) -> Any:
-        value = self.value
-        self.value = None
+        self.internal, output = self._dump(self.internal)
+        return self.reduce_fn(output)
+
+    @staticmethod
+    @abstractmethod
+    def _push(internal: Any, value: Any) -> Any:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def _dump(internal: Any) -> Tuple[Any, Any]:
+        pass
+
+
+class LastDataLog(BaseDataLog):
+
+    @staticmethod
+    def _push(internal: Any, value: Any) -> Any:
         return value
 
-
-class ListLog(DataLog):
-
-    def __init__(self, formatting: Optional[Callable[[List[Any]], str]] = None) -> None:
-        self.values = []
-        self.formatting = formatting
-
-    def push(self, value: Any) -> None:
-        self.values.append(value)
-
-    def dump(self) -> List[Any]:
-        values = self.values
-        self.values = []
-        return values
-
-    def _reduce(self, reduction_fn: Callable[[List[Any]], Any]) -> Any:
-        return reduction_fn(self.value)
+    @staticmethod
+    def _dump(internal: Any) -> Tuple[Any, Any]:
+        return None, internal
 
 
-class QueueLog(DataLog):
+class ListDataLog(BaseDataLog):
 
-    def __init__(self) -> None:
-        raise NotImplementedError
+    ReduceCallableType = Callable[[List[Any]], Any]
+
+    @staticmethod
+    def _push(internal: Any, value: Any) -> Any:
+        if internal is None:
+            internal = []
+        internal.append(value)
+        return internal
+
+    @staticmethod
+    def _dump(internal: Any) -> Tuple[Any, Any]:
+        return None, internal
 
 
-class DictLog(DataLog):
+class BaseHistogram():
 
-    def __init__(self) -> None:
-        raise NotImplementedError
-
-
-class HistLog(DataLog):
+    HistogramData = Dict[str, Tuple[np.ndarray, np.ndarray]]
 
     def __init__(self, n_bins: int) -> None:
-        self.param_fn = None
         self.n_bins = n_bins
 
-    def push(self, fetch_params_fn: Callable[[], Dict[str, np.ndarray]]) -> None:
-        self.param_fn = fetch_params_fn
-
-    def dump(self) -> Dict[str, Dict[str, List[Union[float, int]]]]:
-        params = self.param_fn()
+    def calculate_histogram(self, arrays: Dict[str, np.ndarray]) -> HistogramData:
         histogram_data = {}
-        for name, param in params.items():
+        for name, param in arrays.items():
             freqs, bins = np.histogram(param, bins=self.n_bins, density=True)
             histogram_data[name] = {
-                    "bins": bins.tolist(),
-                    "freqs": freqs.tolist()}
+                "bins": bins.tolist(),
+                "freqs": freqs.tolist()}
         return histogram_data
+
+
+class HistListDataLog(ListDataLog, BaseHistogram):
+
+    ReduceCallableType = Callable[[List[Any]], Dict[str, Any]]
+
+    def __init__(self,
+                 n_bins: int,
+                 reduce_fn: ReduceCallableType,
+                 apply_fn: Optional[BaseDataLog.ApplyCallableType] = None,
+                 ) -> None:
+        super().__init__(apply_fn, reduce_fn=lambda values: self.calculate_histogram(reduce_fn(values)))
+        BaseHistogram.__init__(self, n_bins)
+
+
+class ParamHistDataLog(LastDataLog, BaseHistogram):
+    FetchParamCallable = Callable[[], Dict[str, np.ndarray]]
+    LogItem = FetchParamCallable
+
+    def __init__(self, n_bins: int) -> None:
+        super().__init__(None, reduce_fn=self.reduce_param_hist)
+        BaseHistogram.__init__(self, n_bins)
+
+    def reduce_param_hist(self,
+                          fetch_param_fn: FetchParamCallable
+                          ) -> BaseHistogram.HistogramData:
+        params = fetch_param_fn()
+        return self.calculate_histogram(params)
+
+
+class SequenceNormDataLog(BaseDataLog):
+
+    Scalar = Union[np.float32, np.float64, float]
+    InternalData = Dict[int, List[Scalar]]
+
+    def __init__(self,
+                 reduce_fn: Optional[BaseDataLog.ReduceCallableType] = None) -> None:
+        super().__init__(None, reduce_fn)
+        self.internal = defaultdict(list)
+
+    def add(self, time: int, value: Scalar) -> None:
+        self.internal[time].append(value)
+
+    @staticmethod
+    def _push(self, *args) -> None:
+        raise NotImplementedError
+
+    @staticmethod
+    def _dump(internal: defaultdict) -> Tuple[defaultdict, InternalData]:
+        return defaultdict(list), dict(internal)
+
+
+class BaseNormDataLog(BaseDataLog):
+
+    Scalar = Union[np.float32, np.float64, float]
+    MetricCallableType = Callable[[np.ndarray], Scalar]
+
+    def __init__(self, metric_fn: MetricCallableType) -> None:
+        super().__init__(metric_fn, reduce_fn=None)
+
+
+class LastNormDataLog(BaseNormDataLog, LastDataLog):
+    pass
+
+
+class ListNormDataLog(BaseNormDataLog, ListDataLog):
+    pass
+
 
 class DataLogger():
 
-    def __init__(self, **data_logs: Optional[DataLog]) -> None:
+    def __init__(self, **data_logs: Optional[BaseDataLog]) -> None:
         for name, data_log in data_logs.items():
             self.__setattr__(name, data_log)
 
     def dump(self) -> None:
-        return {name: value.dump() for name, value in self.__dict__.items() if isinstance(value, DataLog)}
+        return {name: value.dump() for name, value in self.__dict__.items() if isinstance(value, BaseDataLog)}
 
     def __setattr__(self, __name: str, __value: Any) -> None:
-        if isinstance(__value, DataLog):
+        if isinstance(__value, BaseDataLog):
             self.__dict__[__name] = __value
         else:
             raise ValueError("Only DataLogs are supported for assignments")
@@ -87,7 +168,7 @@ class DataLogger():
                 raise ValueError(f"Missing Data logger attribute: {name}")
         return True
 
-    def add_if_not_exists(self, loggers: Dict[str, DataLog]):
+    def add_if_not_exists(self, loggers: Dict[str, BaseDataLog]):
         for name, data_logger in loggers.items():
             if name not in self.__dict__.keys():
                 setattr(self, name, data_logger)

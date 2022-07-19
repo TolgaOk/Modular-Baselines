@@ -9,7 +9,7 @@ from stable_baselines3.common.vec_env import VecEnv
 from modular_baselines.component import Component
 from modular_baselines.buffers.buffer import BaseBuffer
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.data_logger import DataLogger, ListLog
+from modular_baselines.loggers.data_logger import DataLogger, ListDataLog, HistListDataLog
 
 
 class BaseCollectorCallback(ABC):
@@ -77,8 +77,9 @@ class RolloutCollector(BaseCollector):
 
     def _init_default_loggers(self) -> None:
         loggers = {
-            "scalar/collector/env_reward": ListLog(formatting=lambda values: np.mean(values)),
-            "scalar/collector/env_length": ListLog(formatting=lambda values: np.mean(values))
+            "scalar/collector/env_reward": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "scalar/collector/env_length": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "dict/histogram/actions": HistListDataLog(n_bins=10, reduce_fn=lambda values: {"action": np.stack(values)}),
         }
         self.logger.add_if_not_exists(loggers)
 
@@ -122,11 +123,14 @@ class RolloutCollector(BaseCollector):
                 **policy_content
             })
 
+            # Log environment info
             for idx, info in enumerate(infos):
                 maybe_ep_info = info.get("episode")
                 if maybe_ep_info is not None:
                     getattr(self.logger, "scalar/collector/env_reward").push(maybe_ep_info["r"])
                     getattr(self.logger, "scalar/collector/env_length").push(maybe_ep_info["l"])
+            # Logging actions for histogram
+            getattr(self.logger, "dict/histogram/actions").push(actions)
 
             self._last_obs = new_obs
 

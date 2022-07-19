@@ -14,7 +14,7 @@ from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, 
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.writers import ScalarWriter, HistogramWriter
+from modular_baselines.loggers.writers import ScalarWriter, DictWriter
 from modular_baselines.loggers.data_logger import DataLogger
 
 
@@ -44,9 +44,8 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
                    CSVOutputFormat(os.path.join(log_dir, "progress.csv")),
                    JSONOutputFormat(os.path.join(log_dir, "progress.json"))]
     logger_callbacks = [
-        ScalarWriter(
-            interval=config.log_interval, dir_path=log_dir, writers=sb3_writers),
-        HistogramWriter(interval=config.log_interval, dir_path=log_dir)
+        ScalarWriter(interval=config.log_interval, dir_path=log_dir, writers=sb3_writers),
+        DictWriter(interval=config.log_interval, dir_path=log_dir)
     ]
 
     vecenv = make_vec_env(

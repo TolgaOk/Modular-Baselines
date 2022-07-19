@@ -6,7 +6,7 @@ import numpy as np
 from modular_baselines.component import Component
 from modular_baselines.collectors.collector import BaseCollector
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.data_logger import DataLogger, DataLog, ListLog
+from modular_baselines.loggers.data_logger import DataLogger, LastDataLog, ListDataLog
 
 
 class BaseAlgorithmCallback(ABC):
@@ -108,9 +108,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         
     def _init_default_loggers(self) -> None:
         loggers = {
-            "scalar/algorithm/iteration": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/timesteps": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/time_elapsed": DataLog(formatting=lambda value: value),
-            "scalar/algorithm/fps": ListLog(formatting=lambda values: int(1 / np.mean(values))),
+            "scalar/algorithm/iteration": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/timesteps": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/time_elapsed": LastDataLog(reduce_fn=lambda value: value),
+            "scalar/algorithm/fps": ListDataLog(reduce_fn=lambda values: int(1 / np.mean(values))),
         }
         self.logger.add_if_not_exists(loggers)

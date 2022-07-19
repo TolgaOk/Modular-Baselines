@@ -59,11 +59,14 @@ The log files of the runs can be visualized in Jupyter Notebook via visualizers.
   <img src="docs/notebook-renderer-1.png" width="45%" />
   <img src="docs/notebook-renderer-2.png" width="45%" />
 </p>
+<p float="left">
 <img src="docs/notebook-renderer-3.png" width="45%" />
+<!-- <img src="docs/notebook-renderer-4.png" width="45%" /> -->
+</p>
 
 ## Maintainers
 
-Modular Baselines has been developed and maintained by [Tolga Ok](https://tolgaok.github.io./).
+Modular Baselines has been developed and maintained by [Tolga Ok](https://tolgaok.github.io./) & [Mehmetcan Kaymaz](https://github.com/MehmetcanKaymaz).
 
 ## Acknowledgments
 
