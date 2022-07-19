@@ -134,6 +134,7 @@ class SequenceRender():
                 mode="lines",
                 legendgroup=legend_name,
                 name=legend_name,
+                showlegend=False,
                 line=dict(
                     color=color,
                     width=2,
