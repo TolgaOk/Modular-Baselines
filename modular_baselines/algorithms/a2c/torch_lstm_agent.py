@@ -58,12 +58,17 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
         for step in range(rollout_size):
 
             # Log gradient of hidden states at each step
-            for name, hidden in th_hidden_state.items():
+            for name in self.policy.hidden_state_info.keys():
+                hidden = th_hidden_state[name]
                 hidden.requires_grad = True
+                # For gradients
                 hidden.register_hook(
-                    partial(lambda time, grad:
-                            getattr(self.logger, f"dict/time_sequence/grad_{name}").add(
-                                time, grad.norm(dim=-1, p="fro").mean(0).item()), step))
+                    partial(lambda time, _name, grad:
+                            getattr(self.logger, f"dict/time_sequence/grad_{_name}").add(
+                                time, grad.norm(dim=-1, p="fro").mean(0).item()), step, name))
+                # For forward values
+                getattr(self.logger, f"dict/time_sequence/forward_{name}").add(
+                                step, hidden.norm(dim=-1, p="fro").mean(0).item())
 
             # Checking for consistency
             for name, hidden_tensor in th_hidden_states.items():
@@ -114,7 +119,8 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = {
-            f"dict/time_sequence/grad_{name}": SequenceNormDataLog()
+            f"dict/time_sequence/{group}_{name}": SequenceNormDataLog()
             for name in self.policy.hidden_state_info.keys()
+            for group in ("grad", "forward")
         }
         self.logger.add_if_not_exists(loggers)
