@@ -2,7 +2,6 @@ from typing import Tuple, Union, Dict, Generator, Optional, Any, List
 from abc import abstractmethod
 import numpy as np
 import torch
-from torch.types import Device
 from gym.spaces import Discrete
 
 from modular_baselines.algorithms.advantages import calculate_gae
@@ -31,12 +30,11 @@ class TorchPPOAgent(TorchAgent):
         return th_action.cpu().numpy(), {"old_log_prob": log_prob.cpu().numpy()}
 
     def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        th_obs, th_action, th_next_obs, th_old_log_prob = [
-            self.to_torch(array) for array in
-            (sample["observation"],
-             sample["action"],
-             sample["next_observation"][:, -1],
-             sample["old_log_prob"])]
+        th_obs, th_action, th_next_obs, th_old_log_prob = self.to_torch([
+            sample["observation"],
+            sample["action"],
+            sample["next_observation"][:, -1],
+            sample["old_log_prob"]])
         return th_obs, th_action, th_next_obs, th_old_log_prob
 
     def prepare_rollout(self, sample: np.ndarray, gamma: float, gae_lambda: float) -> List[torch.Tensor]:
@@ -56,7 +54,7 @@ class TorchPPOAgent(TorchAgent):
             gae_lambda=gae_lambda)
         )
 
-        return (advantages, returns, th_obs, th_action, th_old_log_prob)
+        return (advantages, returns, th_action, th_old_log_prob, th_obs)
 
     def rollout_loader(self, batch_size: int, *tensors: Tuple[torch.Tensor]
                        ) -> Generator[Tuple[torch.Tensor], None, None]:
@@ -64,9 +62,9 @@ class TorchPPOAgent(TorchAgent):
             raise ValueError("Empty tensors")
         flatten_tensors = [self.flatten_time(tensor) for tensor in tensors]
         perm_indices = torch.randperm(flatten_tensors[0].shape[0])
-        for index in range(0, len(perm_indices), batch_size):
-            _slice = slice(index, index + batch_size)
-            yield tuple([tensor[_slice] if tensor is not None else None for tensor in flatten_tensors])
+
+        for indices in perm_indices.split(batch_size):
+            yield tuple([tensor[indices] for tensor in flatten_tensors])
 
     def replay_rollout(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         policy_params, values = self.policy(obs)
@@ -92,12 +90,12 @@ class TorchPPOAgent(TorchAgent):
         rollout_data = self.prepare_rollout(sample, gamma, gae_lambda)
 
         for epoch in range(epochs):
-            for advantages, returns, obs, action, old_log_prob in self.rollout_loader(batch_size, *rollout_data):
+            for advantages, returns, action, old_log_prob, *replay_data in self.rollout_loader(batch_size, *rollout_data):
 
                 if normalize_advantage:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-                policy_params, values = self.replay_rollout(obs)
+                policy_params, values = self.replay_rollout(*replay_data)
                 policy_dist = self.policy.dist(policy_params)
                 if isinstance(self.action_space, Discrete):
                     # action = action.squeeze(-1)

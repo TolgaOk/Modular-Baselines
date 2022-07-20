@@ -167,7 +167,7 @@ class LstmA2C(A2C):
 
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
-        return A2C(
+        return LstmA2C(
             agent=agent,
             collector=collector,
             args=args,

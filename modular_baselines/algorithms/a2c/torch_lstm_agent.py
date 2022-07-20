@@ -11,7 +11,7 @@ from modular_baselines.algorithms.agent import BaseRecurrentAgent
 from modular_baselines.loggers.data_logger import SequenceNormDataLog
 
 
-class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
+class TorchLstmA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
 
     def init_hidden_state(self, batch_size: int) -> Dict[str, np.ndarray]:
         return {name: np.zeros((batch_size, size), dtype=np.float32)
@@ -88,7 +88,7 @@ class TorchLSTMA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
             th_done = th_dones[:, step]
             for name, tensor in th_hidden_state.items():
                 th_hidden_state[name] = (tensor * (1 - th_done) +
-                                         th_reset_state[name] * th_done).detach()
+                                         th_reset_state[name] * th_done)
 
         th_values = torch.stack(values, dim=1)
         th_flatten_values = self.flatten_time(th_values)
