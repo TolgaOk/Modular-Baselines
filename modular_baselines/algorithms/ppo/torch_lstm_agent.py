@@ -22,6 +22,9 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                       hidden_state: Dict[str, np.ndarray]
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
+        action, content = super().sample_action(observation)
+        return action, hidden_state, content
+
         with torch.no_grad():
             th_observation, th_hidden_state = self.to_torch(
                 [observation.astype(np.float32), hidden_state])
