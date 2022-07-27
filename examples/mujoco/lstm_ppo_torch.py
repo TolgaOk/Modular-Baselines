@@ -30,7 +30,7 @@ lstm_ppo_mujoco_config = [MujocoTorchConfig(
         mini_rollout_size=n_step,
         use_sampled_hidden=False,
     ),
-    name="default",
+    name=f"{n_step}_step",
     n_envs=16,
     total_timesteps=5_000_000,
     log_interval=1,
