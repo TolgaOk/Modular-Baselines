@@ -30,6 +30,7 @@ class MujocoTorchConfig():
 def setup(algorithm_cls: Type[BaseAlgorithm],
           agent_cls: Type[BaseAgent],
           network: Type[torch.nn.Module],
+          experiment_name: str,
           env_name: str,
           config: MujocoTorchConfig,
           seed: int
@@ -37,7 +38,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    log_dir = f"logs/{algorithm_cls.__name__}-{env_name.lower()}/{seed}"
+    log_dir = f"logs/{experiment_name}-{algorithm_cls.__name__}-{env_name.lower()}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     sb3_writers = [HumanOutputFormat(sys.stdout),
@@ -80,6 +81,8 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--experiment-name", type=str, default="",
+                        help="Prefix of the experiment name")
     parser.add_argument("--n-procs", type=int, default=1,
                         help="Number of parallelized processes for experiments")
     parser.add_argument("--n-seeds", type=int, default=1,
@@ -96,12 +99,13 @@ def worker(setup_fn, argument_queue: Queue, rank: int) -> None:
 
 def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm],
                  config: MujocoTorchConfig,
+                 experiment_name: str,
                  n_procs: int,
                  env_names: Tuple[str],
                  n_seeds: int
                  ) -> None:
 
-    arguments = [dict(env_name=env_name, seed=seed, config=config)
+    arguments = [dict(env_name=env_name, seed=seed, config=config, experiment_name=experiment_name)
                  for env_name in env_names
                  for seed in np.random.randint(2 ** 10, 2 ** 30, size=n_seeds).tolist()]
 

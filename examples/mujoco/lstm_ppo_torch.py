@@ -9,8 +9,8 @@ from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
-def ppo_setup(env_name: str, config: Dict[str, Any], seed: int):
-    return setup(LstmPPO, TorchLstmPPOAgent, LSTMSeparateNetwork, env_name, config, seed)
+def lstm_ppo_setup(env_name: str, experiment_name: str, config: Dict[str, Any], seed: int):
+    return setup(LstmPPO, TorchLstmPPOAgent, LSTMSeparateNetwork, experiment_name, env_name, config, seed)
 
 
 lstm_ppo_mujoco_config = MujocoTorchConfig(
@@ -39,5 +39,6 @@ if __name__ == "__main__":
     parser = ArgumentParser("PPO Mujoco")
     add_arguments(parser)
     cli_args = parser.parse_args()
-    parallel_run(ppo_setup, lstm_ppo_mujoco_config, n_procs=cli_args.n_procs,
-                 env_names=cli_args.env_names, n_seeds=cli_args.n_seeds)
+    parallel_run(lstm_ppo_setup, lstm_ppo_mujoco_config, n_procs=cli_args.n_procs,
+                 env_names=cli_args.env_names, experiment_name=cli_args.experiment_name,
+                 n_seeds=cli_args.n_seeds)
