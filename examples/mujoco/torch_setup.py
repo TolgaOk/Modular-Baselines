@@ -1,4 +1,4 @@
-from typing import List, Any, Dict, Union, Optional, Tuple, Callable, Type
+from typing import List, Any, Dict, Union, Optional, Tuple, Callable, Type, Iterable
 import torch
 import os
 import numpy as np
@@ -20,6 +20,7 @@ from modular_baselines.loggers.data_logger import DataLogger
 
 @dataclass(frozen=True)
 class MujocoTorchConfig():
+    name: str
     args: Any
     n_envs: int
     total_timesteps: int
@@ -38,7 +39,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    log_dir = f"logs/{experiment_name}-{algorithm_cls.__name__}-{env_name.lower()}/{seed}"
+    log_dir = f"logs/{experiment_name}-{algorithm_cls.__name__}-{env_name.lower()}/{config.name}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     sb3_writers = [HumanOutputFormat(sys.stdout),
@@ -98,15 +99,18 @@ def worker(setup_fn, argument_queue: Queue, rank: int) -> None:
 
 
 def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm],
-                 config: MujocoTorchConfig,
+                 configs: Union[MujocoTorchConfig, Iterable[MujocoTorchConfig]],
                  experiment_name: str,
                  n_procs: int,
                  env_names: Tuple[str],
                  n_seeds: int
                  ) -> None:
 
+    if not isinstance(configs, Iterable):
+        configs = [configs]
     arguments = [dict(env_name=env_name, seed=seed, config=config, experiment_name=experiment_name)
                  for env_name in env_names
+                 for config in configs
                  for seed in np.random.randint(2 ** 10, 2 ** 30, size=n_seeds).tolist()]
 
     argument_queue = Queue()
