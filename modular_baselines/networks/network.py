@@ -142,8 +142,6 @@ class LSTMSeparateNetwork(BaseNetwork):
         self.policy_network = LSTMNetwork(self.in_size, self.out_size, policy_hidden_size, 0.01)
         self.value_network = LSTMNetwork(self.in_size, 1, value_hidden_size, 1.0)
 
-        self.test_network = SeparateFeatureNetwork(observation_space, action_space, policy_hidden_size, value_hidden_size)
-
     @property
     def hidden_state_info(self) -> Dict[str, int]:
         return dict(value_hx=self.value_hidden_size,
@@ -153,12 +151,8 @@ class LSTMSeparateNetwork(BaseNetwork):
 
     def forward(self,
                 state: torch.Tensor,
-                # hidden_states: Dict[str, torch.Tensor]
+                hidden_states: Dict[str, torch.Tensor]
                 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-
-        logits, value = self.test_network(state)
-        return logits, value#, hidden_states
-
         policy_hx, policy_cx = hidden_states["policy_hx"], hidden_states["policy_cx"]
         value_hx, value_cx = hidden_states["value_hx"], hidden_states["value_cx"]
 

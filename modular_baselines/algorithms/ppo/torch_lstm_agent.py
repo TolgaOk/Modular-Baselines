@@ -21,10 +21,6 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                       observation: np.ndarray,
                       hidden_state: Dict[str, np.ndarray]
                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-        action, content = super().sample_action(observation)
-        return action, hidden_state, content
-
         with torch.no_grad():
             th_observation, th_hidden_state = self.to_torch(
                 [observation.astype(np.float32), hidden_state])
@@ -63,8 +59,7 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                 dones=th_dones,
                 check_hidden=True)
             th_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-            # _, th_next_value, _ = self.policy(th_next_obs, th_next_hidden_state)
-            _, th_next_value = self.policy(th_next_obs)
+            _, th_next_value, _ = self.policy(th_next_obs, th_next_hidden_state)
 
         advantages, returns = self.to_torch(calculate_gae(
             rewards=sample["reward"],
@@ -76,7 +71,6 @@ class TorchLstmPPOAgent(TorchPPOAgent):
         )
 
         return (advantages, returns, th_action, th_old_log_prob, th_obs, th_hidden_states, th_dones)
-        # return (advantages, returns, th_action, th_old_log_prob, th_obs)
 
     @nested
     def _make_mini_rollout(self, tensor: torch.Tensor, mini_rollout_size: int) -> torch.Tensor:
@@ -132,8 +126,7 @@ class TorchLstmPPOAgent(TorchPPOAgent):
             if self.use_sampled_hidden:
                 hidden_state = sampled_hidden
 
-            # policy_param, value, hidden_state = self.policy(obs[:, step], hidden_state)
-            policy_param, value = self.policy(obs[:, step])
+            policy_param, value, hidden_state = self.policy(obs[:, step], hidden_state)
             policy_param_list.append(policy_param)
             value_list.append(value)
 
@@ -143,9 +136,9 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                     hidden_state[name] = (tensor * (1 - done) +
                                           th_reset_state[name] * done).detach()
 
-        policy_params = torch.cat(policy_param_list, dim=1)
-        values = torch.cat(value_list, dim=1)
-        return policy_params, values
+        policy_params = torch.stack(policy_param_list, dim=1)
+        values = torch.stack(value_list, dim=1)
+        return self.flatten_time([policy_params, values])
 
     def update_parameters(self,
                           sample: np.ndarray,
