@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Union
 from time import time
 import numpy as np
+from gym import spaces
+
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.component import Component
 from modular_baselines.collectors.collector import BaseCollector
@@ -85,10 +88,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         for callback in self.callbacks:
             callback.on_training_start(locals())
 
-
         while num_timesteps < total_timesteps:
             iteration_start_time = time()
-            
+
             num_timesteps = self.collector.collect(self.rollout_len)
             self.train()
             iteration += 1
@@ -96,7 +98,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             getattr(self.logger, "scalar/algorithm/iteration").push(iteration)
             getattr(self.logger, "scalar/algorithm/timesteps").push(num_timesteps)
             getattr(self.logger, "scalar/algorithm/time_elapsed").push(time() - train_start_time)
-            getattr(self.logger, "scalar/algorithm/fps").push((time() - iteration_start_time) / (self.num_envs * self.rollout_len))
+            getattr(self.logger, "scalar/algorithm/fps").push((time() -
+                                                               iteration_start_time) / (self.num_envs * self.rollout_len))
 
             for callback in self.callbacks:
                 callback.on_step(locals())
@@ -105,7 +108,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             callback.on_training_end(locals())
 
         return None
-        
+
     def _init_default_loggers(self) -> None:
         loggers = {
             "scalar/algorithm/iteration": LastDataLog(reduce_fn=lambda value: value),
@@ -114,3 +117,18 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             "scalar/algorithm/fps": ListDataLog(reduce_fn=lambda values: int(1 / np.mean(values))),
         }
         self.logger.add_if_not_exists(loggers)
+
+    @staticmethod
+    def _setup(env: VecEnv):
+        # TODO: Add different observation spaces
+        observation_space = env.observation_space
+        # TODO: Add different action spaces
+        action_space = env.action_space
+
+        if not isinstance(observation_space, spaces.Box):
+            raise NotImplementedError("Only Box observations are available")
+        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
+            raise NotImplementedError("Only Discrete and Box actions are available")
+
+        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+        return observation_space, action_space, action_dim

@@ -2,7 +2,7 @@ from typing import Any, Dict
 from argparse import ArgumentParser
 
 from modular_baselines.algorithms.a2c import LstmA2C, A2CArgs
-from modular_baselines.algorithms.a2c.torch_lstm_agent import TorchLSTMA2CAgent
+from modular_baselines.algorithms.a2c.torch_lstm_agent import TorchLstmA2CAgent
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from modular_baselines.networks.network import LSTMSeparateNetwork
 
@@ -10,7 +10,7 @@ from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
 def a2c_setup(env_name: str, config: Dict[str, Any], seed: int):
-    return setup(LstmA2C, TorchLSTMA2CAgent, LSTMSeparateNetwork, env_name, config, seed)
+    return setup(LstmA2C, TorchLstmA2CAgent, LSTMSeparateNetwork, env_name, config, seed)
 
 
 lstm_a2c_mujoco_config = MujocoTorchConfig(
