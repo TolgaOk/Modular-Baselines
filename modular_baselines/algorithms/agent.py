@@ -53,21 +53,22 @@ class BaseRecurrentAgent(Component):
 
 
 def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
-    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any]]):
+    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
         if isinstance(collection, dict):
-            return {name: nested_apply(self, value) for name, value in collection.items()}
+            return {name: nested_apply(self, value, **kwargs) for name, value in collection.items()}
         if isinstance(collection, (list, tuple)):
             cls = type(collection)
-            return cls([nested_apply(self, value) for value in collection])
+            return cls([nested_apply(self, value, **kwargs) for value in collection])
         if isinstance(collection, (torch.Tensor, np.ndarray)):
-            return function(self, collection)
+            return function(self, collection, **kwargs)
         raise ValueError(f"Type {type(collection)} is not supported!")
     return nested_apply
 
 
 class TorchAgent(BaseAgent):
 
-    def __init__(self, policy: torch.nn.Module,
+    def __init__(self,
+                 policy: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  observation_space: Space,
                  action_space: Space,
