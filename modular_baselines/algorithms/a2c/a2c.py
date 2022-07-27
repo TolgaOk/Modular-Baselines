@@ -2,6 +2,7 @@ from typing import List, Optional, Union, Dict, Tuple, Any
 from gym import spaces
 import numpy as np
 from dataclasses import dataclass
+
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
@@ -69,21 +70,6 @@ class A2C(OnPolicyAlgorithm):
             lr=next(self.args.lr),
             max_grad_norm=self.args.max_grad_norm,
             normalize_advantage=self.args.normalize_advantage)
-
-    @staticmethod
-    def _setup(env: VecEnv):
-        # TODO: Add different observation spaces
-        observation_space = env.observation_space
-        # TODO: Add different action spaces
-        action_space = env.action_space
-
-        if not isinstance(observation_space, spaces.Box):
-            raise NotImplementedError("Only Box observations are available")
-        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
-            raise NotImplementedError("Only Discrete and Box actions are available")
-
-        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
-        return observation_space, action_space, action_dim
 
     @staticmethod
     def setup(env: VecEnv,
@@ -181,7 +167,7 @@ class LstmA2C(A2C):
 
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
-        return A2C(
+        return LstmA2C(
             agent=agent,
             collector=collector,
             args=args,

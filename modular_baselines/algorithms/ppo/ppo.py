@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
+from modular_baselines.collectors.recurrent import RecurrentRolloutCollector
 from modular_baselines.algorithms.algorithm import OnPolicyAlgorithm, BaseAlgorithmCallback
 from modular_baselines.buffers.buffer import Buffer, BaseBufferCallback
 from modular_baselines.algorithms.agent import BaseAgent
@@ -81,24 +82,7 @@ class PPO(OnPolicyAlgorithm):
               algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
                                                   BaseAlgorithmCallback]] = None,
               ) -> "PPO":
-        # TODO: Add different observation spaces
-        observation_space = env.observation_space
-        # TODO: Add different action spaces
-        action_space = env.action_space
-
-        if not isinstance(observation_space, spaces.Box):
-            raise NotImplementedError("Only Box observations are available")
-        if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
-            raise NotImplementedError("Only Discrete and Box actions are available")
-        policy_states_dtype = []
-        # Check for recurrent policy
-        policy_state = agent.init_hidden_state()
-        if policy_state is not None:
-            policy_states_dtype = [
-                ("policy_state", np.float32, policy_state.shape),
-                ("next_policy_state", np.float32, policy_state.shape)
-            ]
-        action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+        observation_space, action_space, action_dim = PPO._setup(env)
 
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
@@ -107,7 +91,6 @@ class PPO(OnPolicyAlgorithm):
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             ("old_log_prob", np.float32, (1,)),
-            *policy_states_dtype
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
@@ -118,3 +101,89 @@ class PPO(OnPolicyAlgorithm):
             logger=data_logger,
             callbacks=algorithm_callbacks
         )
+
+
+@dataclass(frozen=True)
+class LstmPPOArgs(PPOArgs):
+    mini_rollout_size: int
+    use_sampled_hidden: bool
+
+
+class LstmPPO(PPO):
+    """ LSTM based PPO agent """
+
+    @staticmethod
+    def setup(env: VecEnv,
+              agent: BaseAgent,
+              data_logger: DataLogger,
+              args: LstmPPOArgs,
+              buffer_callbacks: Optional[Union[List[BaseBufferCallback],
+                                               BaseBufferCallback]] = None,
+              collector_callbacks: Optional[Union[List[BaseCollectorCallback],
+                                                  BaseCollectorCallback]] = None,
+              algorithm_callbacks: Optional[Union[List[BaseAlgorithmCallback],
+                                                  BaseAlgorithmCallback]] = None,
+              ) -> "LstmPPO":
+        """ PPO with LSTM agents
+
+        Args:
+            env (VecEnv): Vectorized gym environment
+            agent (BaseAgent): LSTM based agent of selected framework
+            data_logger (DataLogger): Logger for saving training log data
+            args (PPOArgs): Hyperparameters of the algorithm
+            buffer_callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]], optional): Buffer callback(s). Defaults to None.
+            collector_callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector callback(s). Defaults to None.
+            algorithm_callbacks (Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]], optional): Algorithm callback(s). Defaults to None.
+
+        Returns:
+            LstmPPO: PPO with LSTM agent
+        """
+        observation_space, action_space, action_dim = PPO._setup(env)
+
+        struct = np.dtype([
+            ("observation", np.float32, observation_space.shape),
+            ("next_observation", np.float32, observation_space.shape),
+            ("action", action_space.dtype, (action_dim,)),
+            ("reward", np.float32, (1,)),
+            ("termination", np.float32, (1,)),
+            ("old_log_prob", np.float32, (1,)),
+            *[(name, np.float32, array.shape[1:])
+              for name, array in agent.init_hidden_state(1).items()],
+            *[(f"next_{name}", np.float32, array.shape[1:])
+              for name, array in agent.init_hidden_state(1).items()]
+        ])
+
+        buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
+        collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        return LstmPPO(
+            agent=agent,
+            collector=collector,
+            args=args,
+            logger=data_logger,
+            callbacks=algorithm_callbacks,
+        )
+    
+    def train(self) -> Dict[str, float]:
+        """ One step training. This will be called once per rollout.
+
+        Returns:
+            Dict[str, float]: Dictionary of losses to log
+        """
+        self.agent.train_mode()
+        sample = self.buffer.sample(batch_size=self.num_envs,
+                                    rollout_len=self.args.rollout_len,
+                                    sampling_length=self.args.rollout_len)
+        return self.agent.update_parameters(
+            sample,
+            value_coef=self.args.value_coef,
+            ent_coef=self.args.ent_coef,
+            gamma=self.args.gamma,
+            gae_lambda=self.args.gae_lambda,
+            epochs=self.args.epochs,
+            lr=next(self.args.lr),
+            clip_value=next(self.args.clip_value),
+            batch_size=self.args.batch_size,
+            max_grad_norm=self.args.max_grad_norm,
+            normalize_advantage=self.args.normalize_advantage,
+            mini_rollout_size=self.args.mini_rollout_size,
+            use_sampled_hidden=self.args.use_sampled_hidden,)
