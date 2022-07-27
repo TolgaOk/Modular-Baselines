@@ -10,8 +10,8 @@ from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
-def lstm_ppo_setup(env_name: str, experiment_name: str, config: MujocoTorchConfig, seed: int):
-    return setup(LstmPPO, TorchLstmPPOAgent, LSTMSeparateNetwork, experiment_name, env_name, config, seed)
+def lstm_ppo_setup(experiment_name: str, env_name: str, config: MujocoTorchConfig, seed: int, device:str):
+    return setup(LstmPPO, TorchLstmPPOAgent, LSTMSeparateNetwork, experiment_name, env_name, config, seed, device)
 
 
 lstm_ppo_mujoco_config = [MujocoTorchConfig(
@@ -34,7 +34,6 @@ lstm_ppo_mujoco_config = [MujocoTorchConfig(
     n_envs=16,
     total_timesteps=5_000_000,
     log_interval=1,
-    device="cpu",
 ) for n_step in (1, 2, 4, 8, 16, 32, 64)]
 
 if __name__ == "__main__":
@@ -44,4 +43,4 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
     parallel_run(lstm_ppo_setup, lstm_ppo_mujoco_config, n_procs=cli_args.n_procs,
                  env_names=cli_args.env_names, experiment_name=cli_args.experiment_name,
-                 n_seeds=cli_args.n_seeds)
+                 n_seeds=cli_args.n_seeds, cuda_devices=cli_args.cuda_devices)

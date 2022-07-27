@@ -25,7 +25,6 @@ class MujocoTorchConfig():
     n_envs: int
     total_timesteps: int
     log_interval: int
-    device: str
 
 
 def setup(algorithm_cls: Type[BaseAlgorithm],
@@ -34,7 +33,8 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
           experiment_name: str,
           env_name: str,
           config: MujocoTorchConfig,
-          seed: int
+          seed: int,
+          device: str
           ) -> BaseAlgorithm:
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -60,7 +60,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
 
     policy = network(observation_space=vecenv.observation_space,
                      action_space=vecenv.action_space)
-    policy.to(config.device)
+    policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), eps=1e-5)
     agent = agent_cls(policy,
                       optimizer,
@@ -90,12 +90,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                         help="Number of seeds/runs per environment")
     parser.add_argument("--env-names", nargs='+', type=str, required=True,
                         help="Gym environment names")
+    parser.add_argument("--cuda-devices", nargs='+', type=int, required=False,
+                        help="Available cuda devices")
 
 
-def worker(setup_fn, argument_queue: Queue, rank: int) -> None:
+def worker(setup_fn, argument_queue: Queue, rank: int, cuda_devices) -> None:
+    device = "cpu" if len(cuda_devices) == 0 else f"cuda:{cuda_devices[rank % len(cuda_devices)]}"
+    print(f"Worker-{rank} use device: {device}")
     while not argument_queue.empty():
         kwargs = argument_queue.get()
-        setup_fn(**kwargs)
+        setup_fn(device=device, **kwargs)
 
 
 def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm],
@@ -103,7 +107,8 @@ def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm
                  experiment_name: str,
                  n_procs: int,
                  env_names: Tuple[str],
-                 n_seeds: int
+                 n_seeds: int,
+                 cuda_devices: Tuple[int],
                  ) -> None:
 
     if not isinstance(configs, Iterable):
@@ -117,7 +122,7 @@ def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm
     for arg in arguments:
         argument_queue.put(arg)
 
-    processes = [Process(target=worker, args=(setup_fn, argument_queue, rank))
+    processes = [Process(target=worker, args=(setup_fn, argument_queue, rank, cuda_devices))
                  for rank in range(n_procs)]
 
     for proc in processes:
