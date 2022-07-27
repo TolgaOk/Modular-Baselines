@@ -63,7 +63,8 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                 dones=th_dones,
                 check_hidden=True)
             th_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-            _, th_next_value, _ = self.policy(th_next_obs, th_next_hidden_state)
+            # _, th_next_value, _ = self.policy(th_next_obs, th_next_hidden_state)
+            _, th_next_value = self.policy(th_next_obs)
 
         advantages, returns = self.to_torch(calculate_gae(
             rewards=sample["reward"],
@@ -75,6 +76,7 @@ class TorchLstmPPOAgent(TorchPPOAgent):
         )
 
         return (advantages, returns, th_action, th_old_log_prob, th_obs, th_hidden_states, th_dones)
+        # return (advantages, returns, th_action, th_old_log_prob, th_obs)
 
     @nested
     def _make_mini_rollout(self, tensor: torch.Tensor, mini_rollout_size: int) -> torch.Tensor:
@@ -112,7 +114,6 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                        obs: torch.Tensor,
                        hidden_states: Dict[str, torch.tensor],
                        dones: torch.Tensor,
-                       #    use_sampled_hidden: bool = False,
                        check_hidden: bool = False
                        ) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_size, rollout_size = obs.shape[:2]
@@ -131,7 +132,8 @@ class TorchLstmPPOAgent(TorchPPOAgent):
             if self.use_sampled_hidden:
                 hidden_state = sampled_hidden
 
-            policy_param, value, hidden_state = self.policy(obs[:, step], hidden_state)
+            # policy_param, value, hidden_state = self.policy(obs[:, step], hidden_state)
+            policy_param, value = self.policy(obs[:, step])
             policy_param_list.append(policy_param)
             value_list.append(value)
 
@@ -141,8 +143,8 @@ class TorchLstmPPOAgent(TorchPPOAgent):
                     hidden_state[name] = (tensor * (1 - done) +
                                           th_reset_state[name] * done).detach()
 
-        policy_params = torch.cat(policy_param_list, dim=0)
-        values = torch.cat(value_list, dim=0)
+        policy_params = torch.cat(policy_param_list, dim=1)
+        values = torch.cat(value_list, dim=1)
         return policy_params, values
 
     def update_parameters(self,

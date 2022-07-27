@@ -153,11 +153,11 @@ class LSTMSeparateNetwork(BaseNetwork):
 
     def forward(self,
                 state: torch.Tensor,
-                hidden_states: Dict[str, torch.Tensor]
+                # hidden_states: Dict[str, torch.Tensor]
                 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
 
         logits, value = self.test_network(state)
-        return logits, value, hidden_states
+        return logits, value#, hidden_states
 
         policy_hx, policy_cx = hidden_states["policy_hx"], hidden_states["policy_cx"]
         value_hx, value_cx = hidden_states["value_hx"], hidden_states["value_cx"]
