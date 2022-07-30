@@ -8,13 +8,14 @@ from dataclasses import dataclass
 import argparse
 
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, JSONOutputFormat
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.writers import ScalarWriter, DictWriter
+from modular_baselines.loggers.writers import ScalarWriter, DictWriter, BaseWriter
 from modular_baselines.loggers.data_logger import DataLogger
 
 
@@ -27,19 +28,27 @@ class MujocoTorchConfig():
     log_interval: int
 
 
-def setup(algorithm_cls: Type[BaseAlgorithm],
-          agent_cls: Type[BaseAgent],
-          network: Type[torch.nn.Module],
-          experiment_name: str,
-          env_name: str,
-          config: MujocoTorchConfig,
-          seed: int,
-          device: str
-          ) -> BaseAlgorithm:
+def pre_setup(experiment_name: str,
+              env_name: str,
+              config: MujocoTorchConfig,
+              seed: int
+              ) -> Tuple[DataLogger, List[BaseWriter], VecEnv]:
+    """ Prepare loggers and vectorized environment
+
+    Args:
+        experiment_name (str): Name of the experiment
+        env_name (str): Name of the environment
+        config (MujocoTorchConfig): Torch Mujoco configuration
+        seed (int): Environment seed
+
+    Returns:
+        Tuple[DataLogger, List[BaseWriter], VecEnv]: Data logger, writers list and vectorized 
+            environment
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    log_dir = f"logs/{experiment_name}-{algorithm_cls.__name__}-{env_name.lower()}/{config.name}/{seed}"
+    log_dir = f"logs/{experiment_name}-{env_name.lower()}/{config.name}/{seed}"
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     sb3_writers = [HumanOutputFormat(sys.stdout),
@@ -57,6 +66,21 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
         wrapper_class=None,
         vec_env_cls=SubprocVecEnv)
     vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
+    return data_logger, logger_callbacks, vecenv
+
+
+def setup(algorithm_cls: Type[BaseAlgorithm],
+          agent_cls: Type[BaseAgent],
+          network: Type[torch.nn.Module],
+          experiment_name: str,
+          env_name: str,
+          config: MujocoTorchConfig,
+          seed: int,
+          device: str
+          ) -> BaseAlgorithm:
+
+    experiment_name = "-".join([experiment_name, algorithm_cls.__name__])
+    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_name, config, seed)
 
     policy = network(observation_space=vecenv.observation_space,
                      action_space=vecenv.action_space)
@@ -95,7 +119,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def worker(setup_fn, argument_queue: Queue, rank: int, cuda_devices) -> None:
-    device = "cpu" if len(cuda_devices) == 0 else f"cuda:{cuda_devices[rank % len(cuda_devices)]}"
+    device = "cpu" if cuda_devices is None else f"cuda:{cuda_devices[rank % len(cuda_devices)]}"
     print(f"Worker-{rank} use device: {device}")
     while not argument_queue.empty():
         kwargs = argument_queue.get()

@@ -83,7 +83,7 @@ class TorchPPOAgent(TorchAgent):
                           max_grad_norm: float,
                           normalize_advantage: bool,
                           ) -> Dict[str, float]:
-        """ Pytorch A2C parameter update method """
+        """ Pytorch PPO parameter update method """
 
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
