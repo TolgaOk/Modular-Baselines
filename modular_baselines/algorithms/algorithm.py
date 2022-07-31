@@ -49,12 +49,8 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         agent (BaseAgent): Agent to be learned
         buffer (BaseBuffer): Experience Buffer
         collector (BaseCollector): Experience collector
-        env (VecEnv): Vectorized environment
-        rollout_len (int): n-step length
         callbacks (List[BaseAlgorithmCallback], optional): Algorithm callbacks. Defaults to [].
-        device (str, optional): Torch device. Defaults to "cpu".
     """
-
     def __init__(self,
                  agent: BaseAgent,
                  collector: BaseCollector,
