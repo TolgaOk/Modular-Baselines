@@ -88,11 +88,15 @@ class TorchVGAgent(TorchPPOAgent):
             self.model_optimizer.step()
 
             getattr(self.logger, "scalar/model/log_likelihood_loss").push(loss.item())
+            getattr(self.logger, "scalar/model/mae").push(
+                ((th_next_obs - dist.mean).abs().mean(dim=-1)).mean(0).item()
+            )
 
     def _init_default_loggers(self) -> None:
         super()._init_default_loggers()
         loggers = {
             "scalar/model/log_likelihood_loss": ListDataLog(reduce_fn=lambda values: np.mean(values)),
+            "scalar/model/mae": ListDataLog(reduce_fn=lambda values: np.mean(values)),
         }
         self.logger.add_if_not_exists(loggers)
 
@@ -103,3 +107,12 @@ class TorchVGAgent(TorchPPOAgent):
     def eval_mode(self):
         self.policy.train(False)
         self.model.train(False)
+
+    def save(self, path: str) -> None:
+        torch.save({
+            "policy_state_dict": self.policy.state_dict(),
+            "model_state_dict": self.model.state_dict(),
+            "policy_optimizer_state_dict": self.optimizer.state_dict(),
+            "model_optimizer_state_dict": self.model_optimizer.state_dict(),
+        },
+            path)
