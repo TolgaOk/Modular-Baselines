@@ -15,7 +15,7 @@ from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, 
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.writers import ScalarWriter, DictWriter, BaseWriter
+from modular_baselines.loggers.writers import ScalarWriter, DictWriter, BaseWriter, SaveModelParametersWriter
 from modular_baselines.loggers.data_logger import DataLogger
 
 
@@ -56,7 +56,8 @@ def pre_setup(experiment_name: str,
                    JSONOutputFormat(os.path.join(log_dir, "progress.json"))]
     logger_callbacks = [
         ScalarWriter(interval=config.log_interval, dir_path=log_dir, writers=sb3_writers),
-        DictWriter(interval=config.log_interval, dir_path=log_dir)
+        DictWriter(interval=config.log_interval, dir_path=log_dir),
+        SaveModelParametersWriter(interval=config.log_interval * 5, dir_path=log_dir)
     ]
 
     vecenv = make_vec_env(

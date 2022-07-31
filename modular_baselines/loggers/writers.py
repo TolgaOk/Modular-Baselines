@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Type, Union
 import time
 from collections import deque
 import numpy as np
+import pickle
 import os
 import json
 from collections import defaultdict
@@ -90,6 +91,29 @@ class DictWriter(BaseWriter):
                     with open(path, "a") as json_file:
                         json_str = json.dumps(dict(data))
                         json_file.write(json_str + "\n")
+
+
+class SaveModelParametersWriter(BaseWriter):
+
+    prefix: str = "network"
+
+    def __init__(self,
+                 interval: int,
+                 dir_path: str):
+        super().__init__()
+        self.interval = interval
+        self.dir = os.path.join(dir_path, self.prefix)
+        os.makedirs(self.dir, exist_ok=True)
+
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
+
+        iteration = locals_["iteration"]
+        if iteration % self.interval == 0:
+            agent = locals_["self"].agent
+            vecenv = locals_["self"].collector.env
+            agent.save(os.path.join(self.dir, f"params_{iteration}.b"))
+            with open(os.path.join(self.dir, f"env_norm_{iteration}.b"), "wb") as fobj:
+                pickle.dump(vecenv.__getstate__(), fobj)
 
 
 class LogHyperparameters(BaseAlgorithmCallback):
