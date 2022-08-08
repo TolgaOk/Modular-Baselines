@@ -6,6 +6,7 @@ import sys
 from multiprocessing import Process, Queue
 from dataclasses import dataclass
 import argparse
+import gym
 
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
@@ -29,7 +30,7 @@ class MujocoTorchConfig():
 
 
 def pre_setup(experiment_name: str,
-              env_name: str,
+              env: Union[gym.Env, str],
               config: MujocoTorchConfig,
               seed: int
               ) -> Tuple[DataLogger, List[BaseWriter], VecEnv]:
@@ -37,7 +38,7 @@ def pre_setup(experiment_name: str,
 
     Args:
         experiment_name (str): Name of the experiment
-        env_name (str): Name of the environment
+        env (Union[gym.Env, str]): Name of the environment or the environment
         config (MujocoTorchConfig): Torch Mujoco configuration
         seed (int): Environment seed
 
@@ -47,6 +48,7 @@ def pre_setup(experiment_name: str,
     """
     np.random.seed(seed)
     torch.manual_seed(seed)
+    env_name = env if isinstance(env, str) else env.__class__.__name__
 
     log_dir = f"logs/{experiment_name}-{env_name.lower()}/{config.name}/{seed}"
     data_logger = DataLogger()
@@ -61,7 +63,7 @@ def pre_setup(experiment_name: str,
     ]
 
     vecenv = make_vec_env(
-        env_name,
+        env,
         n_envs=config.n_envs,
         seed=seed,
         wrapper_class=None,

@@ -1,6 +1,5 @@
-from os import access
-import numpy as np
 from typing import Tuple
+import numpy as np
 
 
 def calculate_gae(rewards: np.ndarray,
