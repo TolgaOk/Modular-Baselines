@@ -16,7 +16,7 @@ from torch_setup import MujocoTorchConfig, pre_setup, parallel_run, add_argument
 class HopperMaker():
 
     @staticmethod
-    def reward(state: torch.Tensor, action: torch.Tensor, next_state) -> torch.Tensor:
+    def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
         forward_reward = (next_state[..., 0] - state[..., 0]) / 0.008 + 1
         ctrl_reward = 1e-3 * torch.sum(torch.square(action), dim=-1)
         return (forward_reward - ctrl_reward).unsqueeze(-1)
@@ -37,9 +37,8 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
         raise ValueError("Unknown environment name")
     env_maker = known_envs[env_name]
     env_fn, reward_fn = env_maker.make, env_maker.reward
-    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config, seed)
+    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config, seed, use_vec_normalizer=True)
     vecenv.reward_fn = reward_fn
-    
 
     policy = SeparateFeatureNetwork(
         observation_space=vecenv.observation_space,
@@ -73,10 +72,11 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     return learner
 
 
+
 model_based_ppo_mujoco_config = MujocoTorchConfig(
     args=ValueGradientPPOArgs(
         rollout_len=2048,
-        mini_rollout_size=128,
+        mini_rollout_size=16,
         ent_coef=1e-4,
         value_coef=0.5,
         gamma=0.99,
@@ -87,11 +87,11 @@ model_based_ppo_mujoco_config = MujocoTorchConfig(
         buffer_size=2048 * 256,
         normalize_advantage=True,
         clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (2048 * 16)),
-        policy_batch_size=64,
+        policy_batch_size=4,
         model_batch_size=64,
         policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (2048 * 16)),
         model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (2048 * 16)),
-        check_reward_consistency=True,
+        check_reward_consistency=False,
         use_log_likelihood=True,
     ),
     name="default",

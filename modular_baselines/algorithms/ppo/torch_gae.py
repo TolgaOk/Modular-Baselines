@@ -20,11 +20,12 @@ def calculate_diff_gae(rewards: torch.Tensor,
         reward = rewards[:, index]
         termination = terminations[:, index].float()
         value = values[:, index]
+
         td_error = last_value * (1 - termination) * gamma + reward - value
         last_value = value
         advantage = advantage * (1 - termination) * gamma * gae_lambda + td_error
-        advantages.append(advantage)
+        advantages.insert(0, advantage)
     
-    advantages = torch.stack(list(reversed(advantages)), dim=1)
+    advantages = torch.stack(advantages, dim=1)
     returns = advantages + values
     return advantages, returns

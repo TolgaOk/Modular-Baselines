@@ -32,7 +32,8 @@ class MujocoTorchConfig():
 def pre_setup(experiment_name: str,
               env: Union[gym.Env, str],
               config: MujocoTorchConfig,
-              seed: int
+              seed: int,
+              use_vec_normalizer: bool = True
               ) -> Tuple[DataLogger, List[BaseWriter], VecEnv]:
     """ Prepare loggers and vectorized environment
 
@@ -68,7 +69,8 @@ def pre_setup(experiment_name: str,
         seed=seed,
         wrapper_class=None,
         vec_env_cls=SubprocVecEnv)
-    vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
+    if use_vec_normalizer:
+        vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
     return data_logger, logger_callbacks, vecenv
 
 

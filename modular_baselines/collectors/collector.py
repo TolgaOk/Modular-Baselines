@@ -5,6 +5,7 @@ from gym.spaces import Discrete, Box
 from abc import ABC, abstractmethod
 
 from stable_baselines3.common.vec_env import VecEnv
+from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 
 from modular_baselines.component import Component
 from modular_baselines.buffers.buffer import BaseBuffer
@@ -58,10 +59,12 @@ class RolloutCollector(BaseCollector):
                  agent: BaseAgent,
                  logger: DataLogger,
                  callbacks: Optional[Union[List[BaseCollectorCallback],
-                                           BaseCollectorCallback]] = None):
+                                           BaseCollectorCallback]] = None,
+                 store_normalizer_stats: bool = False):
         self.env = env
         self.buffer = buffer
         self.agent = agent
+        self.store_normalizer_stats = store_normalizer_stats
         super().__init__(logger)
 
         for field in self._required_buffer_fields:
@@ -114,13 +117,20 @@ class RolloutCollector(BaseCollector):
             self.num_timesteps += self.env.num_envs
             n_steps += 1
 
+            normalizer_stats = {}
+            if self.store_normalizer_stats and isinstance(self.env, VecNormalize):
+                normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(1, -1).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+
             self.buffer.push({
                 "observation": self._last_obs,
                 "next_observation": next_obs,
                 "reward": rewards,
                 "termination": dones,
                 "action": actions,
-                **policy_content
+                **policy_content,
+                **normalizer_stats,
             })
 
             # Log environment info
