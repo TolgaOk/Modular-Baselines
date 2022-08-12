@@ -114,6 +114,7 @@ class ValueGradientPPOArgs(ModelBasedPPOArgs):
     check_reward_consistency: bool
     use_log_likelihood: bool
     mini_rollout_size: int
+    use_reparameterization: bool
 
 
 class ValueGradientPPO(ModelBasedPPO):
@@ -153,4 +154,5 @@ class ValueGradientPPO(ModelBasedPPO):
             mini_rollout_size=self.args.mini_rollout_size,
             check_reward_consistency=self.args.check_reward_consistency,
             use_log_likelihood=self.args.use_log_likelihood,
+            use_reparameterization=self.args.use_reparameterization,
         )
