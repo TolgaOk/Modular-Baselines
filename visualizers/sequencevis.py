@@ -85,7 +85,7 @@ class SequenceRender():
 
     def aggregate_statistics(self):
         stacked_values = {step: np.stack(values) for step, values in self.data[self.time_index].items()}
-        return {step: {"upper_quantile": np.max(values),
+        return {int(step): {"upper_quantile": np.max(values),
                        "lower_quantile": np.min(values),
                        "mean": np.mean(values)} for step, values in stacked_values.items()}
 
