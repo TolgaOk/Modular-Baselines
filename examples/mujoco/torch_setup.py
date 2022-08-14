@@ -27,6 +27,7 @@ class MujocoTorchConfig():
     n_envs: int
     total_timesteps: int
     log_interval: int
+    log_dir: Optional[str] = None
 
 
 def pre_setup(experiment_name: str,
@@ -51,7 +52,10 @@ def pre_setup(experiment_name: str,
     torch.manual_seed(seed)
     env_name = env if isinstance(env, str) else env.__class__.__name__
 
-    log_dir = f"logs/{experiment_name}-{env_name.lower()}/{config.name}/{seed}"
+    log_dir = os.path.join(
+        "" if config.log_dir is None else config.log_dir,
+        f"logs/{experiment_name}-{env_name.lower()}/{config.name}/{seed}")
+    print(f"Logging directory is set to: {log_dir} for experiment {experiment_name} with seed {seed}")
     data_logger = DataLogger()
     os.makedirs(log_dir, exist_ok=True)
     sb3_writers = [HumanOutputFormat(sys.stdout),
