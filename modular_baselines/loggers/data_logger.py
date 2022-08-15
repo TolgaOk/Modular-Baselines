@@ -14,7 +14,7 @@ class BaseDataLog():
                  apply_fn: Optional[ApplyCallableType] = None,
                  reduce_fn: Optional[ReduceCallableType] = None
                  ) -> None:
-        self.internal = None
+        self.internal = self.default_internal()
         self.apply_fn = apply_fn if apply_fn is not None else lambda x: x
         self.reduce_fn = reduce_fn if reduce_fn is not None else lambda x: x
 
@@ -24,6 +24,11 @@ class BaseDataLog():
     def dump(self) -> Any:
         self.internal, output = self._dump(self.internal)
         return self.reduce_fn(output)
+        
+    @staticmethod
+    @abstractmethod
+    def default_internal() -> Any:
+        pass
 
     @staticmethod
     @abstractmethod
@@ -39,12 +44,16 @@ class BaseDataLog():
 class LastDataLog(BaseDataLog):
 
     @staticmethod
+    def default_internal() -> Any:
+        return None
+
+    @staticmethod
     def _push(internal: Any, value: Any) -> Any:
         return value
 
     @staticmethod
     def _dump(internal: Any) -> Tuple[Any, Any]:
-        return None, internal
+        return LastDataLog.default_internal(), internal
 
 
 class ListDataLog(BaseDataLog):
@@ -52,15 +61,17 @@ class ListDataLog(BaseDataLog):
     ReduceCallableType = Callable[[List[Any]], Any]
 
     @staticmethod
+    def default_internal() -> Any:
+        return []
+
+    @staticmethod
     def _push(internal: Any, value: Any) -> Any:
-        if internal is None:
-            internal = []
         internal.append(value)
         return internal
 
     @staticmethod
     def _dump(internal: Any) -> Tuple[Any, Any]:
-        return None, internal
+        return ListDataLog.default_internal(), internal
 
 
 class BaseHistogram():
@@ -116,7 +127,11 @@ class SequenceNormDataLog(BaseDataLog):
     def __init__(self,
                  reduce_fn: Optional[BaseDataLog.ReduceCallableType] = None) -> None:
         super().__init__(None, reduce_fn)
-        self.internal = defaultdict(list)
+        self.internal = self.default_internal()
+
+    @staticmethod
+    def default_internal() -> Any:
+        return defaultdict(list)
 
     def add(self, time: int, value: Scalar) -> None:
         self.internal[time].append(value)
@@ -127,7 +142,7 @@ class SequenceNormDataLog(BaseDataLog):
 
     @staticmethod
     def _dump(internal: defaultdict) -> Tuple[defaultdict, InternalData]:
-        return defaultdict(list), dict(internal)
+        return SequenceNormDataLog.default_internal(), dict(internal)
 
 
 class BaseNormDataLog(BaseDataLog):
@@ -160,7 +175,7 @@ class DataLogger():
         if isinstance(__value, BaseDataLog):
             self.__dict__[__name] = __value
         else:
-            raise ValueError("Only DataLogs are supported for assignments")
+            raise ValueError(f"Only DataLogs are supported for assignments, given type: {type(__value)}")
 
     def check_attributes(self, names: List[str]) -> bool:
         for name in names:
