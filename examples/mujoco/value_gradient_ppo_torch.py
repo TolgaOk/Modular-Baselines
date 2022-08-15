@@ -73,32 +73,33 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
 
 
 
-model_based_ppo_mujoco_config = MujocoTorchConfig(
+value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     args=ValueGradientPPOArgs(
-        rollout_len=2048,
-        mini_rollout_size=16,
+        rollout_len=5,
+        mini_rollout_size=5,
         ent_coef=1e-4,
         value_coef=0.5,
         gamma=0.99,
         gae_lambda=0.95,
-        policy_epochs=10,
-        model_epochs=10,
+        policy_epochs=1,
+        model_epochs=2,
         max_grad_norm=1.0,
         buffer_size=2048 * 256,
         normalize_advantage=True,
-        clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (2048 * 16)),
-        policy_batch_size=4,
+        clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (5 * 16)),
+        policy_batch_size=16,
         model_batch_size=64,
-        policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (2048 * 16)),
-        model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (2048 * 16)),
+        policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
+        model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
         check_reward_consistency=False,
         use_log_likelihood=False,
         use_reparameterization=True,
+        policy_loss_beta=LinearAnnealing(1.0, 0.0, 2_000_000 // (5 * 16)),
     ),
-    name="default",
+    name="a2c-like",
     n_envs=16,
     total_timesteps=5_000_000,
-    log_interval=1,
+    log_interval=256,
 )
 
 if __name__ == "__main__":
@@ -106,9 +107,17 @@ if __name__ == "__main__":
     add_arguments(parser)
     cli_args = parser.parse_args()
     parallel_run(value_gradient_ppo_setup,
-                 model_based_ppo_mujoco_config,
+                 value_gradient_ppo_mujoco_config,
                  n_procs=cli_args.n_procs,
                  env_names=cli_args.env_names,
                  n_seeds=cli_args.n_seeds,
                  experiment_name=cli_args.experiment_name,
                  cuda_devices=cli_args.cuda_devices)
+
+    # value_gradient_ppo_setup(
+    #     experiment_name=cli_args.experiment_name,
+    #     env_name=cli_args.env_names[0],
+    #     config=value_gradient_ppo_mujoco_config,
+    #     seed=1073664207,
+    #     device="cpu"
+    # )

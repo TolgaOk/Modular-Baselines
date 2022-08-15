@@ -104,6 +104,10 @@ class TorchAgent(BaseAgent):
         return {name: param.detach().cpu().numpy()
                 for name, param in self.policy.named_parameters()}
 
+    def grad_dict_as_numpy(self) -> Dict[str, np.ndarray]:
+        return {name: param.grad.cpu().numpy() if param.grad is not None else param.grad
+                for name, param in self.policy.named_parameters}
+
     def save(self, path: str) -> None:
         torch.save({
             "policy_state_dict": self.policy.state_dict(),
