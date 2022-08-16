@@ -38,7 +38,7 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
         raise ValueError("Unknown environment name")
     env_maker = known_envs[env_name]
     env_fn, reward_fn = env_maker.make, env_maker.reward
-    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config, seed, use_vec_normalizer=True)
+    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config, seed)
     vecenv.reward_fn = reward_fn
 
     policy = SeparateFeatureNetwork(
@@ -101,7 +101,8 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     n_envs=16,
     total_timesteps=5_000_000,
     log_interval=256,
-    use_recording=False
+    record_video=True,
+    use_vec_normalizer=True,
 )
 
 if __name__ == "__main__":
