@@ -13,6 +13,7 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, JSONOutputFormat
+from stable_baselines3.common.vec_env.vec_video_recorder import VecVideoRecorder
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
@@ -22,18 +23,20 @@ from modular_baselines.loggers.data_logger import DataLogger
 
 @dataclass(frozen=True)
 class MujocoTorchConfig():
-    name: str
     args: Any
+    name: str
     n_envs: int
     total_timesteps: int
     log_interval: int
+    record_video: bool
+    use_vec_normalizer: bool
 
 
 def pre_setup(experiment_name: str,
               env: Union[gym.Env, str],
               config: MujocoTorchConfig,
               seed: int,
-              use_vec_normalizer: bool = True
+              use_vec_normalizer: bool = True,
               ) -> Tuple[DataLogger, List[BaseWriter], VecEnv]:
     """ Prepare loggers and vectorized environment
 
@@ -71,6 +74,13 @@ def pre_setup(experiment_name: str,
         vec_env_cls=SubprocVecEnv)
     if use_vec_normalizer:
         vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
+    if config.record_video:
+        vecenv = VecVideoRecorder(
+            vecenv,
+            f"{log_dir}/videos",
+            record_video_trigger=lambda x: x % 25000 == 0, video_length=1000
+        )
+
     return data_logger, logger_callbacks, vecenv
 
 

@@ -1,6 +1,7 @@
 from typing import Any, Dict, Union
 from argparse import ArgumentParser
 import gym
+import os
 from gym.envs.mujoco.hopper_v4 import HopperEnv
 import torch
 
@@ -85,14 +86,14 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
         model_epochs=2,
         max_grad_norm=1.0,
         buffer_size=2048 * 256,
-        normalize_advantage=True,
+        normalize_advantage=False,
         clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (5 * 16)),
         policy_batch_size=16,
         model_batch_size=64,
         policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
         model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
         check_reward_consistency=False,
-        use_log_likelihood=False,
+        use_log_likelihood=True,
         use_reparameterization=True,
         policy_loss_beta=LinearAnnealing(1.0, 0.0, 2_000_000 // (5 * 16)),
     ),
@@ -100,9 +101,11 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     n_envs=16,
     total_timesteps=5_000_000,
     log_interval=256,
+    use_recording=False
 )
 
 if __name__ == "__main__":
+    os.environ["MUJOCO_GL"]="egl"
     parser = ArgumentParser("Value Gradient PPO Mujoco")
     add_arguments(parser)
     cli_args = parser.parse_args()

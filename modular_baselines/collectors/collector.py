@@ -118,7 +118,7 @@ class RolloutCollector(BaseCollector):
             n_steps += 1
 
             normalizer_stats = {}
-            if self.store_normalizer_stats and isinstance(self.env, VecNormalize):
+            if self.store_normalizer_stats:
                 normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(1, -1).repeat(self.env.num_envs, axis=0)
                 normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
                 normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
