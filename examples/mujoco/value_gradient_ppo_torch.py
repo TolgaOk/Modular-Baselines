@@ -2,6 +2,7 @@ from typing import Any, Dict, Union
 from argparse import ArgumentParser
 import gym
 import os
+import numpy as np
 from gym.envs.mujoco.hopper_v4 import HopperEnv
 import torch
 
@@ -33,12 +34,12 @@ known_envs = {
 }
 
 
-def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str], config: MujocoTorchConfig, seed: int, device: str):
+def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str], config: MujocoTorchConfig, device: str):
     if env_name not in known_envs.keys():
         raise ValueError("Unknown environment name")
     env_maker = known_envs[env_name]
     env_fn, reward_fn = env_maker.make, env_maker.reward
-    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config, seed)
+    data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config)
     vecenv.reward_fn = reward_fn
 
     policy = SeparateFeatureNetwork(
@@ -101,8 +102,9 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     n_envs=16,
     total_timesteps=5_000_000,
     log_interval=256,
-    record_video=True,
-    use_vec_normalizer=True,
+    use_vec_normalization=True,
+    record_video=False,
+    seed=np.random.randint(2**10, 2**30),
 )
 
 if __name__ == "__main__":
@@ -114,7 +116,6 @@ if __name__ == "__main__":
                  value_gradient_ppo_mujoco_config,
                  n_procs=cli_args.n_procs,
                  env_names=cli_args.env_names,
-                 n_seeds=cli_args.n_seeds,
                  experiment_name=cli_args.experiment_name,
                  cuda_devices=cli_args.cuda_devices)
 

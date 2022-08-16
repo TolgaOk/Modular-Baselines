@@ -5,8 +5,7 @@ import numpy as np
 import pickle
 import os
 import json
-from collections import defaultdict
-from abc import ABC, abstractmethod
+import dataclasses
 
 from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
 
@@ -116,23 +115,29 @@ class SaveModelParametersWriter(BaseWriter):
                 pickle.dump(vecenv.__getstate__(), fobj)
 
 
-class LogHyperparameters(BaseAlgorithmCallback):
+class LogConfigs():
+
+    prefix: str = "config"
 
     def __init__(self,
-                 log_dir: str,
-                 hyperparameters: Dict[str, Any],
-                 file_name: str = "hyperparameters.json"):
+                 config: Any,
+                 dir_path: str,
+                 file_name: str = "config.json"
+                 ) -> None:
+        super().__init__()
+        self.dir = os.path.join(dir_path, self.prefix)
         self.file_name = file_name
-        self.log_dir = log_dir
-        self.hyperparameters = hyperparameters
+        os.makedirs(self.dir, exist_ok=True)
 
-    def on_training_start(self, *args) -> None:
-        path = os.path.join(self.log_dir, self.file_name)
+        self.write(config)
+
+    def write(self, config: Any) -> None:
+        path = os.path.join(self.dir, self.file_name)
         with open(path, "w") as fobj:
-            json.dump(self.hyperparameters, fobj)
+            json.dump(config, fobj, default=self.serializer)
 
-    def on_training_end(self, *args) -> None:
-        pass
-
-    def on_step(self, *args) -> None:
-        pass
+    @staticmethod
+    def serializer(obj: Any):
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        return obj.jsonize()

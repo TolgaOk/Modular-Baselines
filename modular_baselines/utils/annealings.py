@@ -9,6 +9,12 @@ class Coefficient():
     def __next__(self):
         return self.value
 
+    def jsonize(self):
+        return {
+            "class_name": self.__class__.__name__,
+            "value": self.value
+        }
+
 
 class LinearAnnealing(Coefficient):
 
@@ -26,6 +32,15 @@ class LinearAnnealing(Coefficient):
         value_ = self.value
         self.value = max(self.final_value, self.value - self.delta)
         return value_
+
+    def jsonize(self):
+        return {
+            "class_name": self.__class__.__name__,
+            "value": self.value,
+            "init_value": self.init_value,
+            "final_value": self.final_value,
+            "n_iterations": self.n_iterations,
+        }
 
 
 class ExponentialAnnealing(Coefficient):
@@ -45,3 +60,17 @@ class ExponentialAnnealing(Coefficient):
         value_ = self.value
         self.value = max(self.final_value, self.value * self.exponent)
         return value_
+
+    def jsonize(self):
+        return {
+            "class_name": self.__class__.__name__,
+            "value": self.value,
+            "init_value": self.init_value,
+            "final_value": self.final_value,
+            "exponent": self.exponent,
+        }
+
+
+def load_from_dict(args_dict):
+    class_name = args_dict.pop("class_name")
+    return getattr(globals(), class_name)(**args_dict)
