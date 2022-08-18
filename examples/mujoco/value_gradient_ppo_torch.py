@@ -4,6 +4,7 @@ import gym
 import os
 import numpy as np
 from gym.envs.mujoco.hopper_v4 import HopperEnv
+from gym.envs.mujoco.walker2d_v4 import Walker2dEnv
 import torch
 
 from modular_baselines.algorithms.ppo.model_based_ppo import ValueGradientPPOArgs, ValueGradientPPO
@@ -28,15 +29,29 @@ class HopperMaker():
         env = HopperEnv(exclude_current_positions_from_observation=False)
         return env
 
+class Walker2dMaker():
+
+    @staticmethod
+    def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
+        forward_reward = (next_state[..., 0] - state[..., 0]) / 0.008 + 1
+        ctrl_reward = 1e-3 * torch.sum(torch.square(action), dim=-1)
+        return (forward_reward - ctrl_reward).unsqueeze(-1)
+
+    @staticmethod
+    def make():
+        env = Walker2dEnv(exclude_current_positions_from_observation=False)
+        return env
+
 
 known_envs = {
-    "Hopper-v4": HopperMaker()
+    "Hopper-v4": HopperMaker(),
+    "Walker2d-v4": Walker2dMaker() 
 }
 
 
 def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str], config: MujocoTorchConfig, device: str):
     if env_name not in known_envs.keys():
-        raise ValueError("Unknown environment name")
+        raise ValueError(f"Unknown environment name: {env_name}")
     env_maker = known_envs[env_name]
     env_fn, reward_fn = env_maker.make, env_maker.reward
     data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config)
@@ -74,11 +89,13 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     return learner
 
 
+rollout_len = 8
+n_envs = 16
 
 value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     args=ValueGradientPPOArgs(
-        rollout_len=5,
-        mini_rollout_size=5,
+        rollout_len=rollout_len,
+        mini_rollout_size=rollout_len,
         ent_coef=1e-4,
         value_coef=0.5,
         gamma=0.99,
@@ -87,19 +104,19 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
         model_epochs=2,
         max_grad_norm=1.0,
         buffer_size=2048 * 256,
-        normalize_advantage=False,
-        clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (5 * 16)),
-        policy_batch_size=16,
+        normalize_advantage=True,
+        clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (rollout_len * n_envs)),
+        policy_batch_size=n_envs,
         model_batch_size=64,
-        policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
-        model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (5 * 16)),
-        check_reward_consistency=False,
+        policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
+        model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
+        check_reward_consistency=True,
         use_log_likelihood=True,
-        use_reparameterization=True,
-        policy_loss_beta=LinearAnnealing(1.0, 0.0, 2_000_000 // (5 * 16)),
+        use_reparameterization=False,
+        policy_loss_beta=LinearAnnealing(1.0, 0.0, 2_000_000 // (rollout_len * n_envs)),
     ),
     name="a2c-like",
-    n_envs=16,
+    n_envs=n_envs,
     total_timesteps=5_000_000,
     log_interval=256,
     use_vec_normalization=True,
