@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from gym.spaces import Space
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import partial
 
 from modular_baselines.algorithms.ppo.torch_agent import TorchPPOAgent
@@ -101,6 +102,21 @@ class TorchModelBasedAgent(TorchPPOAgent):
                 for name, param in parameters}
 
 
+@dataclass
+class VgRollout:
+    obs: torch.Tensor
+    act: torch.Tensor
+    next_obs: torch.Tensor
+    done: torch.Tensor
+    reward: torch.Tensor
+    old_log_p: torch.Tensor
+    reward_rms_var: torch.Tensor
+    obs_rms_mean: torch.Tensor
+    obs_rms_var: torch.Tensor
+    next_obs_rms_mean: torch.Tensor
+    next_obs_rms_var: torch.Tensor
+
+
 class TorchValueGradientAgent(TorchModelBasedAgent):
 
     def __init__(self,
@@ -134,6 +150,8 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
             sample["reward_rms_var"],
             sample["obs_rms_mean"],
             sample["obs_rms_var"],
+            sample["next_obs_rms_mean"],
+            sample["next_obs_rms_var"],
         ])
 
     def reparameterize(self,
@@ -199,13 +217,13 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                        sample: np.ndarray,
                        batch_size: int,
                        mini_rollout_size: int,
-                       ) -> torch.Tensor:
+                       ) -> VgRollout:
         rollout_data = self.rollout_to_torch(sample)
         mini_rollout_data = TorchLstmPPOAgent._make_mini_rollout(self,
                                                                  rollout_data, mini_rollout_size=mini_rollout_size)
         perm_indices = torch.randperm(mini_rollout_data[0].shape[0])
         for indices in perm_indices.split(batch_size):
-            yield TorchLstmPPOAgent._take_slice(self, mini_rollout_data, indices=indices)
+            yield VgRollout(*TorchLstmPPOAgent._take_slice(self, mini_rollout_data, indices=indices))
 
     def target_policy_update(self):
         self.target_policy.load_state_dict(self.policy.state_dict())
@@ -215,14 +233,16 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                          obs: torch.Tensor,
                          act: torch.Tensor,
                          next_obs: torch.Tensor,
-                         reward_rms_var: torch.Tensor,
-                         obs_rms_mean: torch.Tensor,
                          obs_rms_var: torch.Tensor,
+                         obs_rms_mean: torch.Tensor,
+                         next_obs_rms_var: torch.Tensor,
+                         next_obs_rms_mean: torch.Tensor,
+                         reward_rms_var: torch.Tensor,
                          epsilon: float = 1e-8
                          ) -> torch.Tensor:
-        obs_rms_std = torch.sqrt(obs_rms_var + epsilon)
-        orig_obs = obs * obs_rms_std + obs_rms_mean
-        orig_next_obs = next_obs * obs_rms_std + obs_rms_mean
+
+        orig_obs = obs * torch.sqrt(obs_rms_var + epsilon) + obs_rms_mean
+        orig_next_obs = next_obs * torch.sqrt(next_obs_rms_var + epsilon) + next_obs_rms_mean
 
         return reward_fn(orig_obs, act, orig_next_obs) / torch.sqrt(reward_rms_var + epsilon)
 
@@ -254,37 +274,50 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         self.target_policy_update()
 
         for epoch in range(epochs):
-            for th_obs, th_act, th_next_obs, th_done, sampled_reward, th_old_log_p, reward_rms_var, obs_rms_mean, obs_rms_var in self.rollout_loader(
-                    sample, batch_size=batch_size, mini_rollout_size=mini_rollout_size):
+            for mini_rollout in self.rollout_loader(sample, batch_size=batch_size, mini_rollout_size=mini_rollout_size):
 
                 if use_reparameterization:
                     re_obs, re_acts, re_next_obs, policy_params, values = self.reparameterize(
-                        th_obs, th_act, th_next_obs, th_done)
+                        mini_rollout.obs, mini_rollout.act, mini_rollout.next_obs, mini_rollout.done)
                     rewards = self.calculate_reward(
-                        reward_fn, re_obs, re_acts, re_next_obs, reward_rms_var, obs_rms_mean, obs_rms_var)
+                        reward_fn, re_obs, re_acts, re_next_obs, 
+                        mini_rollout.obs_rms_var,
+                        mini_rollout.obs_rms_mean,
+                        mini_rollout.next_obs_rms_var,
+                        mini_rollout.next_obs_rms_mean,
+                        mini_rollout.reward_rms_var)
                     obs = re_obs
                     next_obs = re_next_obs
                 else:
-                    policy_params, values = self.policy(th_obs)
-                    rewards = self.calculate_reward(
-                        reward_fn, th_obs, th_act, th_next_obs, reward_rms_var, obs_rms_mean, obs_rms_var)
-                    obs = th_obs
-                    next_obs = th_next_obs
+                    policy_params, values = self.policy(mini_rollout.obs)
+                    rewards = mini_rollout.reward
+                    obs = mini_rollout.obs
+                    next_obs = mini_rollout.next_obs
 
                 _, old_values = self.target_policy(obs)  # Must contain the time dimension
                 _, old_last_value = self.target_policy(next_obs[:, -1])
 
                 if check_reward_consistency:
-                    if not torch.allclose(rewards, sampled_reward, atol=1e-3):
-                        raise RuntimeError("Mismatch between reward function and sampled rewards")
+                    if not torch.allclose(rewards, mini_rollout.reward, atol=1e-5):
+                        mismatch = (rewards - mini_rollout.reward).abs().mean()
+                        print("rewards", rewards[0])
+                        print("sampled_rewards", mini_rollout.reward[0])
+                        print([item[0] for item in [
+                            mini_rollout.obs_rms_mean,
+                            mini_rollout.next_obs_rms_mean,
+                            mini_rollout.obs_rms_var,
+                            mini_rollout.next_obs_rms_var,
+                            mini_rollout.reward_rms_var,
+                        ]])
+                        raise RuntimeError(f"Mismatch between reward function and sampled rewards: {mismatch}")
 
                 advantages, returns = calculate_diff_gae(
-                    rewards, th_done, old_values, old_last_value, gamma=gamma, gae_lambda=gae_lambda)
+                    rewards, mini_rollout.done, old_values, old_last_value, gamma=gamma, gae_lambda=gae_lambda)
 
                 if check_gae:
                     np_advantages, np_returns = calculate_gae(
                         *[tensor.cpu().detach().numpy()
-                          for tensor in [sampled_reward, th_done, old_values, old_last_value]],
+                          for tensor in [mini_rollout.reward, mini_rollout.done, old_values, old_last_value]],
                         gamma=gamma, gae_lambda=gae_lambda
                     )
                     if not np.allclose(advantages.cpu().detach().numpy(), np_advantages, atol=1e-5):
@@ -293,7 +326,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                         raise RuntimeError("Mismatch returns!")
 
                 flat_act, flat_old_log_prob, flat_advantages, flat_returns, flat_param, flat_value = self.flatten_time(
-                    [th_act, th_old_log_p, advantages, returns, policy_params, values]
+                    [mini_rollout.act, mini_rollout.old_log_p, advantages, returns, policy_params, values]
                 )
 
                 policy_dist = self.policy.dist(flat_param)

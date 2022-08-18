@@ -96,6 +96,8 @@ class ModelBasedPPO(PPO):
             ("reward_rms_var", np.float32, (1,)),
             ("obs_rms_mean", np.float32, observation_space.shape),
             ("obs_rms_var", np.float32, observation_space.shape),
+            ("next_obs_rms_mean", np.float32, observation_space.shape),
+            ("next_obs_rms_var", np.float32, observation_space.shape),
         ])
         buffer = Buffer(struct, args.buffer_size, env.num_envs, data_logger, buffer_callbacks)
         collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks, store_normalizer_stats=True)

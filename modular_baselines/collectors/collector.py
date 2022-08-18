@@ -104,6 +104,10 @@ class RolloutCollector(BaseCollector):
         while n_steps < n_rollout_steps:
 
             actions, policy_content = self.get_actions()
+            normalizer_stats = {}
+            if self.store_normalizer_stats:
+                normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
@@ -117,11 +121,10 @@ class RolloutCollector(BaseCollector):
             self.num_timesteps += self.env.num_envs
             n_steps += 1
 
-            normalizer_stats = {}
             if self.store_normalizer_stats:
                 normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(1, -1).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
             self.buffer.push({
                 "observation": self._last_obs,
