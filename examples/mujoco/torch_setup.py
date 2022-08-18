@@ -73,7 +73,11 @@ def pre_setup(experiment_name: str,
         wrapper_class=None,
         vec_env_cls=SubprocVecEnv)
     if config.use_vec_normalization:
-        vecenv = VecNormalize(vecenv, training=True, gamma=config.args.gamma)
+        vecenv = VecNormalize(vecenv,
+         training=True,
+         gamma=config.args.gamma,
+         clip_obs=1e5,
+         clip_reward=1e5,)
     if config.record_video:
         vecenv = VecVideoRecorder(
             vecenv,
