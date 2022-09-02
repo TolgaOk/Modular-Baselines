@@ -8,6 +8,9 @@ import json
 import dataclasses
 
 from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
+from stable_baselines3.common.vec_env.base_vec_env import VecEnvWrapper
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
 from modular_baselines.collectors.collector import BaseCollectorCallback
@@ -111,8 +114,19 @@ class SaveModelParametersWriter(BaseWriter):
             agent = locals_["self"].agent
             vecenv = locals_["self"].collector.env
             agent.save(os.path.join(self.dir, f"params_{iteration}.b"))
-            with open(os.path.join(self.dir, f"env_norm_{iteration}.b"), "wb") as fobj:
-                pickle.dump(vecenv.__getstate__(), fobj)
+            if self.is_vec_env(vecenv):
+                with open(os.path.join(self.dir, f"env_norm_{iteration}.b"), "wb") as fobj:
+                    pickle.dump(vecenv.__getstate__(), fobj)
+
+    def is_vec_env(self, vecenv: Union[VecEnv, VecEnvWrapper]) -> bool:
+        is_vec_normalize = False
+        while isinstance(vecenv, VecEnvWrapper):
+            if isinstance(vecenv, VecNormalize):
+                is_vec_normalize = True
+                break
+            vecenv = vecenv.venv
+        return is_vec_normalize
+        
 
 
 class LogConfigs():

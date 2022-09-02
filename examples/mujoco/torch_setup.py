@@ -30,7 +30,6 @@ class MujocoTorchConfig():
     total_timesteps: int
     log_interval: int
     record_video: bool
-    use_vec_normalization: bool
     seed: int
 
 
@@ -63,7 +62,7 @@ def pre_setup(experiment_name: str,
     logger_callbacks = [
         ScalarWriter(interval=config.log_interval, dir_path=log_dir, writers=sb3_writers),
         DictWriter(interval=config.log_interval, dir_path=log_dir),
-        SaveModelParametersWriter(interval=config.log_interval * 5, dir_path=log_dir)
+        SaveModelParametersWriter(interval=config.log_interval * 1, dir_path=log_dir)
     ]
 
     vecenv = make_vec_env(
@@ -72,7 +71,7 @@ def pre_setup(experiment_name: str,
         seed=config.seed,
         wrapper_class=None,
         vec_env_cls=SubprocVecEnv)
-    if config.use_vec_normalization:
+    if config.args.use_vec_normalization:
         vecenv = VecNormalize(vecenv,
          training=True,
          gamma=config.args.gamma,

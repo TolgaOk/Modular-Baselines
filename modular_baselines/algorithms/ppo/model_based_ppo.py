@@ -30,6 +30,7 @@ class ModelBasedPPOArgs():
     model_batch_size: int
     policy_lr: Coefficient
     model_lr: Coefficient
+    use_vec_normalization: bool
 
 
 class ModelBasedPPO(PPO):
@@ -52,8 +53,8 @@ class ModelBasedPPO(PPO):
             for _ in range(self.args.model_epochs)]
 
         self.agent.update_model_parameters(samples=random_samples,
-                                max_grad_norm=self.args.max_grad_norm,
-                                lr=next(self.args.model_lr))
+                                           max_grad_norm=self.args.max_grad_norm,
+                                           lr=next(self.args.model_lr))
         self.agent.update_policy_parameters(
             sample=recent_sample,
             value_coef=self.args.value_coef,
@@ -86,6 +87,15 @@ class ModelBasedPPO(PPO):
             raise ValueError(
                 f"Buffer size: {args.buffer_size} can not be smaller than the rollout length: {args.rollout_len}")
 
+        normalizer_struct = []
+        if args.use_vec_normalization:
+            normalizer_struct = [
+                ("reward_rms_var", np.float32, (1,)),
+                ("obs_rms_mean", np.float32, observation_space.shape),
+                ("obs_rms_var", np.float32, observation_space.shape),
+                ("next_obs_rms_mean", np.float32, observation_space.shape),
+                ("next_obs_rms_var", np.float32, observation_space.shape),
+            ]
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
@@ -93,14 +103,11 @@ class ModelBasedPPO(PPO):
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             ("old_log_prob", np.float32, (1,)),
-            ("reward_rms_var", np.float32, (1,)),
-            ("obs_rms_mean", np.float32, observation_space.shape),
-            ("obs_rms_var", np.float32, observation_space.shape),
-            ("next_obs_rms_mean", np.float32, observation_space.shape),
-            ("next_obs_rms_var", np.float32, observation_space.shape),
+            *normalizer_struct
         ])
         buffer = Buffer(struct, args.buffer_size, env.num_envs, data_logger, buffer_callbacks)
-        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks, store_normalizer_stats=True)
+        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks,
+                                     store_normalizer_stats=args.use_vec_normalization)
 
         return cls(
             agent=agent,
@@ -139,8 +146,8 @@ class ValueGradientPPO(ModelBasedPPO):
             sampling_length=None)
             for _ in range(self.args.model_epochs)]
         self.agent.update_model_parameters(samples=random_samples,
-                                max_grad_norm=self.args.max_grad_norm,
-                                lr=next(self.args.model_lr))
+                                           max_grad_norm=self.args.max_grad_norm,
+                                           lr=next(self.args.model_lr))
         self.agent.update_policy_parameters(
             sample=recent_sample,
             reward_fn=self.collector.env.reward_fn,
@@ -157,6 +164,7 @@ class ValueGradientPPO(ModelBasedPPO):
             mini_rollout_size=self.args.mini_rollout_size,
             check_reward_consistency=self.args.check_reward_consistency,
             use_log_likelihood=self.args.use_log_likelihood,
+            is_vec_normalize=self.args.use_vec_normalization,
             use_reparameterization=self.args.use_reparameterization,
             policy_loss_beta=next(self.args.policy_loss_beta),
         )
