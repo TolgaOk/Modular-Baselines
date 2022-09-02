@@ -51,10 +51,11 @@ class TorchModelBasedAgent(TorchPPOAgent):
                     sample["next_observation"],
                 ]))
 
-            parameters = self.model(th_obs, th_acts)
+            embed_obs = self.model.immersion(th_obs)
+            parameters = self.model(embed_obs, th_acts)
             dist = self.model.dist(parameters)
 
-            log_prob = dist.log_prob(th_next_obs)
+            log_prob = dist.log_prob(self.model.immersion(th_next_obs))
             loss = -log_prob.mean(0)
             self.model_optimizer.zero_grad()
             loss.backward()
@@ -63,7 +64,7 @@ class TorchModelBasedAgent(TorchPPOAgent):
 
             getattr(self.logger, "scalar/model/log_likelihood_loss").push(loss.item())
             getattr(self.logger, "scalar/model/mae").push(
-                ((th_next_obs - dist.mean).abs().mean(dim=-1)).mean(0).item()
+                ((th_next_obs - self.model.submersion(dist.mean)).abs().mean(dim=-1)).mean(0).item()
             )
 
     def _init_default_loggers(self) -> None:
@@ -139,7 +140,25 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
     def sample_action(self, observation: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return TorchModelBasedAgent.sample_action(self, observation)
 
-    def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
+    def rollout_to_torch(self, sample: np.ndarray, is_vec_normalize: bool) -> Tuple[torch.Tensor]:
+
+        if is_vec_normalize:
+            norm_sample = [
+                sample["reward_rms_var"],
+                sample["obs_rms_mean"],
+                sample["obs_rms_var"],
+                sample["next_obs_rms_mean"],
+                sample["next_obs_rms_var"]
+            ]
+        else:
+            norm_sample = [
+                np.ones_like(sample["reward"]),
+                np.zeros_like(sample["observation"]),
+                np.ones_like(sample["observation"]),
+                np.zeros_like(sample["observation"]),
+                np.ones_like(sample["observation"]),
+            ]
+
         return self.to_torch([
             sample["observation"],
             sample["action"],
@@ -147,11 +166,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
             sample["termination"],
             sample["reward"],
             sample["old_log_prob"],
-            sample["reward_rms_var"],
-            sample["obs_rms_mean"],
-            sample["obs_rms_var"],
-            sample["next_obs_rms_mean"],
-            sample["next_obs_rms_var"],
+            *norm_sample
         ])
 
     def reparameterize(self,
@@ -164,10 +179,12 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         obs_list = []
         act_list = []
         next_obs_list = []
-        pi_param_list = []
+        # pi_param_list = []
         # value_list = []
         re_obs = th_obs[:, 0]
         re_obs.requires_grad = True
+        re_obs_embed = self.model.immersion(re_obs)
+        # re_obs_embed.requires_grad = True
 
         th_pi_params, th_values = self.policy(th_obs)  # Use sampled obs
 
@@ -182,14 +199,21 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
             pi_dist = self.policy.dist(pi_param)
             re_act = self._normal_reparam(act, pi_dist)
 
-            model_param = self.model(re_obs, re_act)  # Use reparam obs and acts
+            model_param = self.model(re_obs_embed, re_act)  # Use reparam obs and acts
             model_dist = self.model.dist(model_param)
-            re_next_obs = self._normal_reparam(next_obs, model_dist)
+            next_obs_embed = self.model.immersion(next_obs)
+            re_next_obs_embed = self._normal_reparam(next_obs_embed, model_dist)
+            re_next_obs = self.model.submersion(re_next_obs_embed)
 
             # Log forward values
             getattr(self.logger, f"dict/time_sequence/forward_state").add(
                 step, re_obs.norm(dim=-1, p="fro").mean(0).item())
-            # Log gradients w.r.t action
+            # Log gradients w.r.t embed
+            re_obs_embed.register_hook(
+                partial(lambda time, grad:
+                        getattr(self.logger, f"dict/time_sequence/grad_embed").add(
+                            time, grad.norm(dim=-1, p="fro").mean(0).item()), step))
+            # Log gradients w.r.t observation
             re_obs.register_hook(
                 partial(lambda time, grad:
                         getattr(self.logger, f"dict/time_sequence/grad_state").add(
@@ -203,11 +227,14 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
             obs_list.append(re_obs)
             act_list.append(re_act)
             next_obs_list.append(re_next_obs)
-            pi_param_list.append(pi_param)
 
             if step != (rollout_len - 1):
-                th_obs[:, step + 1].requires_grad = True
-                re_obs = (1 - done) * re_next_obs + done * th_obs[:, step + 1]
+                reset_obs = th_obs[:, step + 1]
+                reset_obs.requires_grad = True
+                reset_obs_embed = self.model.immersion(reset_obs)
+                re_obs_embed = (1 - done) * re_next_obs_embed + done * reset_obs_embed
+                re_obs = (1 - done) * self.model.submersion(re_next_obs_embed) + done * reset_obs
+                # re_obs = self.model.submersion(re_obs_embed)
 
         return (*[
             torch.stack(tensor_list, dim=1) for tensor_list in
@@ -223,8 +250,9 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                        sample: np.ndarray,
                        batch_size: int,
                        mini_rollout_size: int,
+                       is_vec_normalize: bool
                        ) -> VgRollout:
-        rollout_data = self.rollout_to_torch(sample)
+        rollout_data = self.rollout_to_torch(sample, is_vec_normalize=is_vec_normalize)
         mini_rollout_data = TorchLstmPPOAgent._make_mini_rollout(self,
                                                                  rollout_data, mini_rollout_size=mini_rollout_size)
         # perm_indices = torch.randperm(mini_rollout_data[0].shape[0])
@@ -250,6 +278,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
 
         orig_obs = obs * torch.sqrt(obs_rms_var + epsilon) + obs_rms_mean
         orig_next_obs = next_obs * torch.sqrt(next_obs_rms_var + epsilon) + next_obs_rms_mean
+        # TODO!!!: Clipping actions remove gradient for clipped values!
         orig_act = torch.clamp(act, -1, 1)
         return reward_fn(orig_obs, orig_act, orig_next_obs) / torch.sqrt(reward_rms_var + epsilon)
 
@@ -269,6 +298,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                                  normalize_advantage: bool,
                                  check_reward_consistency: bool,
                                  use_log_likelihood: bool,
+                                 is_vec_normalize: bool,
                                  check_gae: bool = True,
                                  use_reparameterization: bool = True,
                                  policy_loss_beta: float = 1.0,
@@ -280,7 +310,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         self.target_policy_update()
 
         for epoch in range(epochs):
-            for mini_rollout in self.rollout_loader(sample, batch_size=batch_size, mini_rollout_size=mini_rollout_size):
+            for mini_rollout in self.rollout_loader(sample, batch_size=batch_size, mini_rollout_size=mini_rollout_size, is_vec_normalize=is_vec_normalize):
 
                 if use_reparameterization:
                     re_obs, re_acts, re_next_obs, policy_params, values = self.reparameterize(
@@ -305,11 +335,13 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
 
                 if check_reward_consistency:
                     if not torch.allclose(obs, mini_rollout.obs, atol=1e-6):
+                        mismatch = (obs - mini_rollout.obs).abs().max().item()
                         raise RuntimeError(
-                            "Mismatch between reparameterized and sampled observations")
+                            f"Mismatch between reparameterized and sampled observations: {mismatch}")
                     if not torch.allclose(next_obs, mini_rollout.next_obs, atol=1e-6):
+                        mismatch = (next_obs - mini_rollout.next_obs).abs().max().item()
                         raise RuntimeError(
-                            "Mismatch between reparameterized and sampled next observations")
+                            f"Mismatch between reparameterized and sampled next observations: {mismatch}")
 
                 if check_reward_consistency:
                     if not torch.allclose(rewards, mini_rollout.reward, atol=1e-4):
@@ -320,7 +352,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                 advantages, returns = calculate_diff_gae(
                     rewards, mini_rollout.done, old_values, old_last_value, gamma=gamma, gae_lambda=gae_lambda)
 
-                if check_gae:
+                if check_reward_consistency:
                     np_advantages, np_returns = calculate_gae(
                         *[tensor.cpu().detach().numpy()
                           for tensor in [mini_rollout.reward, mini_rollout.done,
@@ -329,7 +361,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                         gamma=gamma, gae_lambda=gae_lambda
                     )
                     if not np.allclose(advantages.cpu().detach().numpy(), np_advantages, atol=1e-5):
-                        raise RuntimeError("Mismatch advantages!")
+                        raise RuntimeError(f"Mismatch advantages! Mismatch: {np.abs(advantages.cpu().detach().numpy() - np_advantages).max()}")
                     if not np.allclose(returns.cpu().detach().numpy(), np_returns, atol=1e-5):
                         raise RuntimeError("Mismatch returns!")
 
@@ -409,9 +441,9 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         # maximize return that is formed using rewards and re-parameterized states
         ratio = ratio.detach()
 
-        if normalize_advantage:
-            advantages = (advantages - advantages.mean()) / \
-                (advantages.std() + 1e-8)
+        # if normalize_advantage:
+        #     advantages = (advantages - advantages.mean()) / \
+        #         (advantages.std() + 1e-8)
 
         surrogate_loss_1 = advantages * ratio
         surrogate_loss_2 = torch.clamp(advantages * ratio,
@@ -441,7 +473,7 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         super()._init_default_loggers()
         loggers = {
             f"dict/time_sequence/{name}": SequenceNormDataLog()
-            for name in ("grad_state", "forward_state", "grad_action")
+            for name in ("grad_state", "forward_state", "grad_action", "grad_embed")
         }
         loggers["scalar/agent/policy_loss_beta"] = ListDataLog(
             reduce_fn=lambda values: np.max(values))
