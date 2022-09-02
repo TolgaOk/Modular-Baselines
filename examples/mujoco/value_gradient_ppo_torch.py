@@ -6,6 +6,7 @@ import numpy as np
 from gym.envs.mujoco.hopper_v4 import HopperEnv
 from gym.envs.mujoco.walker2d_v4 import Walker2dEnv
 import torch
+from gym.spaces import Box
 
 from modular_baselines.algorithms.ppo.model_based_ppo import ValueGradientPPOArgs, ValueGradientPPO
 from modular_baselines.algorithms.ppo.torch_model_based_agent import TorchValueGradientAgent
@@ -16,27 +17,22 @@ from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from torch_setup import MujocoTorchConfig, pre_setup, parallel_run, add_arguments
 
 
-class HopperMaker():
-
+class MujocoMaker():
     @staticmethod
     def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
         forward_reward = (next_state[..., 0] - state[..., 0]) / 0.008 + 1
         ctrl_reward = 1e-3 * torch.sum(torch.square(action), dim=-1)
         return (forward_reward - ctrl_reward).unsqueeze(-1)
 
+
+class HopperMaker(MujocoMaker):
     @staticmethod
     def make():
         env = HopperEnv(exclude_current_positions_from_observation=False)
         return env
 
-class Walker2dMaker():
 
-    @staticmethod
-    def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
-        forward_reward = (next_state[..., 0] - state[..., 0]) / 0.008 + 1
-        ctrl_reward = 1e-3 * torch.sum(torch.square(action), dim=-1)
-        return (forward_reward - ctrl_reward).unsqueeze(-1)
-
+class Walker2dMaker(MujocoMaker):
     @staticmethod
     def make():
         env = Walker2dEnv(exclude_current_positions_from_observation=False)
@@ -45,8 +41,22 @@ class Walker2dMaker():
 
 known_envs = {
     "Hopper-v4": HopperMaker(),
-    "Walker2d-v4": Walker2dMaker() 
+    "Walker2d-v4": Walker2dMaker()
 }
+
+
+class MujocoSeparateFeatureNetwork(SeparateFeatureNetwork):
+
+    def __init__(self, observation_space: Box, *args, **kwargs):
+        observation_space = Box(
+            low=observation_space.low[1:],
+            high=observation_space.high[1:]
+        )
+        super().__init__(observation_space, *args, **kwargs)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        obs = obs[..., 1:]
+        return super().forward(obs)
 
 
 def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str], config: MujocoTorchConfig, device: str):
@@ -57,7 +67,7 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config)
     vecenv.reward_fn = reward_fn
 
-    policy = SeparateFeatureNetwork(
+    policy = MujocoSeparateFeatureNetwork(
         observation_space=vecenv.observation_space,
         action_space=vecenv.action_space)
     policy.to(device)
@@ -89,19 +99,19 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     return learner
 
 
-rollout_len = 8
+rollout_len = 2048
 n_envs = 16
 
 value_gradient_ppo_mujoco_config = MujocoTorchConfig(
     args=ValueGradientPPOArgs(
         rollout_len=rollout_len,
-        mini_rollout_size=rollout_len,
+        mini_rollout_size=64,
         ent_coef=1e-4,
         value_coef=0.5,
         gamma=0.99,
         gae_lambda=0.95,
-        policy_epochs=1,
-        model_epochs=2,
+        policy_epochs=10,
+        model_epochs=25,
         max_grad_norm=1.0,
         buffer_size=2048 * 256,
         normalize_advantage=True,
@@ -111,21 +121,21 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
         policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
         model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
         check_reward_consistency=True,
-        use_log_likelihood=True,
-        use_reparameterization=False,
-        policy_loss_beta=LinearAnnealing(1.0, 0.0, 2_000_000 // (rollout_len * n_envs)),
+        use_log_likelihood=False,
+        use_reparameterization=True,
+        policy_loss_beta=LinearAnnealing(1.0, 0.1, 1_000_000 // (rollout_len * n_envs)),
     ),
-    name="a2c-like",
+    name="ppo",
     n_envs=n_envs,
     total_timesteps=5_000_000,
-    log_interval=256,
+    log_interval=1,
     use_vec_normalization=True,
     record_video=False,
-    seed=np.random.randint(2**10, 2**30),
+    seed=683083883#np.random.randint(2**10, 2**30),
 )
 
 if __name__ == "__main__":
-    os.environ["MUJOCO_GL"]="egl"
+    os.environ["MUJOCO_GL"] = "egl"
     parser = ArgumentParser("Value Gradient PPO Mujoco")
     add_arguments(parser)
     cli_args = parser.parse_args()
@@ -135,11 +145,3 @@ if __name__ == "__main__":
                  env_names=cli_args.env_names,
                  experiment_name=cli_args.experiment_name,
                  cuda_devices=cli_args.cuda_devices)
-
-    # value_gradient_ppo_setup(
-    #     experiment_name=cli_args.experiment_name,
-    #     env_name=cli_args.env_names[0],
-    #     config=value_gradient_ppo_mujoco_config,
-    #     seed=1073664207,
-    #     device="cpu"
-    # )
