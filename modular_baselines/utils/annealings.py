@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, List
 
 
 class Coefficient():
@@ -26,7 +26,7 @@ class LinearAnnealing(Coefficient):
         self.final_value = final_value
         self.n_iterations = n_iterations
         self.delta = (init_value - final_value) / n_iterations
-        self.value = init_value
+        super().__init__(init_value)
 
     def __next__(self):
         value_ = self.value
@@ -54,7 +54,7 @@ class ExponentialAnnealing(Coefficient):
         self.init_value = init_value
         self.final_value = final_value
         self.exponent = exponent
-        self.value = init_value
+        super().__init__(init_value)
 
     def __next__(self):
         value_ = self.value
@@ -68,6 +68,34 @@ class ExponentialAnnealing(Coefficient):
             "init_value": self.init_value,
             "final_value": self.final_value,
             "exponent": self.exponent,
+        }
+
+
+class JumpAnnealing(Coefficient):
+
+    def __init__(self, init_value: float, final_value: float, jump_step: int) -> None:
+        if final_value > init_value:
+            raise ValueError(
+                f"Final_value: {final_value} must be smaller than init_value: {init_value}")
+        self.init_value = init_value
+        self.final_value = final_value
+        self.jump_step = jump_step
+        super().__init__(init_value)
+        self.counter = 0
+
+    def __next__(self):
+        value_ = self.value
+        is_jump = int(self.counter >= self.jump_step)
+        self.value = self.init_value * (1 - is_jump) + self.final_value * is_jump
+        return value_
+
+    def jsonize(self):
+        return {
+            "class_name": self.__class__.__name__,
+            "value": self.value,
+            "init_value": self.init_value,
+            "final_value": self.final_value,
+            "jump_step": self.jump_step,
         }
 
 
