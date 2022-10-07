@@ -161,7 +161,8 @@ class HistRender():
             self.fig,
         ],
             layout=Layout(
-                width="46%",
+                margin="10px",
+                flex="1 1 46%",
                 height="460px",
                 display="flex",
                 flex_flow="column",

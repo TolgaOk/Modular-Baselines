@@ -160,11 +160,10 @@ class SequenceRender():
             self.fig,
         ],
             layout=Layout(
-                width="46%",
                 height="460px",
-                display="flex",
-                flex_flow="column",
                 justify_content="space-around",
-                border="solid 2px gray"
+                border="solid 2px gray",
+                margin="10px",
+                flex="1 1 46%",
         ))
         return out_display

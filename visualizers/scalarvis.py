@@ -140,7 +140,8 @@ class ScalarRender():
             self.fig,
         ],
             layout=Layout(
-                width="46%",
+                flex="1 1 46%",
+                margin="10px",
                 height="460px",
                 display="flex",
                 flex_flow="column",
@@ -336,7 +337,8 @@ class MultiScalarRender(ScalarRender):
             self.fig,
         ],
             layout=Layout(
-                width="46%",
+                margin="10px",
+                flex="1 1 46%",
                 height="460px",
                 display="flex",
                 flex_flow="column",
@@ -499,7 +501,8 @@ class ComparisonScalarRender(MultiScalarRender):
             ])
         ],
             layout=Layout(
-            width="96%",
+            margin="10px",
+            flex="1 1 98%",
             height="600px",
             display="flex",
             flex_flow="column",
