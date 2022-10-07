@@ -4,6 +4,7 @@ import gym
 import os
 import numpy as np
 from gym.envs.mujoco.hopper_v4 import HopperEnv
+from gym.envs.mujoco.inverted_pendulum_v4 import InvertedPendulumEnv
 from gym.envs.mujoco.walker2d_v4 import Walker2dEnv
 import torch
 from gym.spaces import Box
@@ -11,7 +12,7 @@ from gym.spaces import Box
 from modular_baselines.algorithms.ppo.model_based_ppo import ValueGradientPPOArgs, ValueGradientPPO
 from modular_baselines.algorithms.ppo.torch_model_based_agent import TorchValueGradientAgent
 from modular_baselines.networks.network import SeparateFeatureNetwork
-from modular_baselines.networks.model import ModelNetwork
+from modular_baselines.networks.model import ModelNetwork, StiefelNetwork
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 
 from torch_setup import MujocoTorchConfig, pre_setup, parallel_run, add_arguments
@@ -24,6 +25,26 @@ class MujocoMaker():
         ctrl_reward = 1e-3 * torch.sum(torch.square(action), dim=-1)
         return (forward_reward - ctrl_reward).unsqueeze(-1)
 
+    @staticmethod
+    def policy_class(*args, **kwargs):
+        return MujocoSeparateFeatureNetwork(*args, **kwargs)
+
+
+class InvertedPendulumMaker():
+
+    @staticmethod
+    def make():
+        env = InvertedPendulumEnv()
+        return env
+
+    @staticmethod
+    def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("The original reward function contains only constant")
+
+    @staticmethod
+    def policy_class(*args, **kwargs):
+        return SeparateFeatureNetwork(*args, **kwargs)
+    
 
 class HopperMaker(MujocoMaker):
     @staticmethod
@@ -38,10 +59,15 @@ class Walker2dMaker(MujocoMaker):
         env = Walker2dEnv(exclude_current_positions_from_observation=False)
         return env
 
+    @staticmethod
+    def policy_class(*args, **kwargs):
+        return MujocoSeparateFeatureNetwork(*args, **kwargs)
+
 
 known_envs = {
     "Hopper-v4": HopperMaker(),
-    "Walker2d-v4": Walker2dMaker()
+    "Walker2d-v4": Walker2dMaker(),
+    "InvertedPendulum-v4": InvertedPendulumMaker(),
 }
 
 
@@ -67,12 +93,14 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_fn, config)
     vecenv.reward_fn = reward_fn
 
-    policy = MujocoSeparateFeatureNetwork(
+    policy = env_maker.policy_class(
         observation_space=vecenv.observation_space,
         action_space=vecenv.action_space)
     policy.to(device)
-    model = ModelNetwork(state_size=vecenv.observation_space.shape[0],
-                         action_size=vecenv.action_space.shape[0])
+    model = StiefelNetwork(state_size=vecenv.observation_space.shape[0],
+                           action_size=vecenv.action_space.shape[0],
+                           hidden_size=128,
+                           n_layers=2)
     model.to(device)
     policy_optimizer = torch.optim.Adam(policy.parameters(), eps=1e-5)
     model_optimizer = torch.optim.Adam(model.parameters(), eps=1e-5)
@@ -96,6 +124,7 @@ def value_gradient_ppo_setup(experiment_name: str, env_name: Union[gym.Env, str]
     )
 
     learner.learn(total_timesteps=config.total_timesteps)
+    # np.save(f"buffer_{config.total_timesteps}.npy", learner.buffer.buffer)
     return learner
 
 
@@ -111,27 +140,28 @@ value_gradient_ppo_mujoco_config = MujocoTorchConfig(
         gamma=0.99,
         gae_lambda=0.95,
         policy_epochs=10,
-        model_epochs=25,
+        model_epochs=5000,
         max_grad_norm=1.0,
-        buffer_size=2048 * 256,
+        buffer_size=2048 * 64,
         normalize_advantage=True,
         clip_value=LinearAnnealing(0.2, 0.2, 5_000_000 // (rollout_len * n_envs)),
-        policy_batch_size=n_envs,
+        policy_batch_size=n_envs, 
         model_batch_size=64,
         policy_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
-        model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
-        check_reward_consistency=True,
-        use_log_likelihood=False,
-        use_reparameterization=True,
-        policy_loss_beta=LinearAnnealing(1.0, 0.1, 1_000_000 // (rollout_len * n_envs)),
+        # model_lr=LinearAnnealing(3e-4, 0.0, 5_000_000 // (rollout_len * n_envs)),
+        model_lr=Coefficient(3e-4),
+        check_reparam_consistency=True,
+        use_log_likelihood=True,
+        use_reparameterization=False,
+        policy_loss_beta=LinearAnnealing(1.0, 0.1, 5_000_000 // (rollout_len * n_envs)),
+        use_vec_normalization=True,
     ),
     name="ppo",
     n_envs=n_envs,
     total_timesteps=5_000_000,
     log_interval=1,
-    use_vec_normalization=True,
     record_video=False,
-    seed=683083883#np.random.randint(2**10, 2**30),
+    seed=np.random.randint(2**10, 2**30),  # 683083883
 )
 
 if __name__ == "__main__":
@@ -145,3 +175,4 @@ if __name__ == "__main__":
                  env_names=cli_args.env_names,
                  experiment_name=cli_args.experiment_name,
                  cuda_devices=cli_args.cuda_devices)
+
