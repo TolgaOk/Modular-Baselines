@@ -91,7 +91,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             value_coef=0.5,
             gamma=0.99,
             gae_lambda=1.0,
-            policy_epochs=1,
+            policy_epochs=10,
             model_epochs=25,
             max_grad_norm=1.0,
             buffer_size=2048 * 256,
@@ -101,7 +101,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             model_batch_size=64,
             policy_lr=LinearAnnealing(3e-4, 0.0, total_timestep // (rollout_len * n_envs)),
             model_lr=LinearAnnealing(3e-4, 0.0, total_timestep // (rollout_len * n_envs)),
-            check_reward_consistency=False,
+            check_reparam_consistency=False,
             use_log_likelihood=True,
             use_reparameterization=False,
             policy_loss_beta=LinearAnnealing(1.0, 0.1, 200_000 // (rollout_len * n_envs)),
@@ -112,7 +112,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
         total_timesteps=total_timestep,
         log_interval=100,
         record_video=False,
-        seed=np.random.randint(2**10, 2**30),
+        seed=np.random.randint(2**10, 2**30) ,
     )
 
 
