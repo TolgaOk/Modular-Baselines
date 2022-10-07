@@ -120,7 +120,7 @@ class ModelBasedPPO(PPO):
 
 @dataclass(frozen=True)
 class ValueGradientPPOArgs(ModelBasedPPOArgs):
-    check_reward_consistency: bool
+    check_reparam_consistency: bool
     use_log_likelihood: bool
     mini_rollout_size: int
     use_reparameterization: bool
@@ -162,7 +162,7 @@ class ValueGradientPPO(ModelBasedPPO):
             max_grad_norm=self.args.max_grad_norm,
             normalize_advantage=self.args.normalize_advantage,
             mini_rollout_size=self.args.mini_rollout_size,
-            check_reward_consistency=self.args.check_reward_consistency,
+            check_reparam_consistency=self.args.check_reparam_consistency,
             use_log_likelihood=self.args.use_log_likelihood,
             is_vec_normalize=self.args.use_vec_normalization,
             use_reparameterization=self.args.use_reparameterization,
