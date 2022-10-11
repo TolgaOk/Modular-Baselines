@@ -81,7 +81,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
 
     rollout_len = env_length
     n_envs = 500 // env_length
-    total_timestep = 3_000_000
+    total_timestep = 1_000_000
 
     return MujocoTorchConfig(
         args=ValueGradientPPOArgs(
@@ -92,7 +92,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             gamma=0.99,
             gae_lambda=1.0,
             policy_epochs=10,
-            model_epochs=25,
+            model_epochs=100,
             max_grad_norm=1.0,
             buffer_size=2048 * 256,
             normalize_advantage=True,
@@ -102,15 +102,15 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             policy_lr=LinearAnnealing(3e-4, 0.0, total_timestep // (rollout_len * n_envs)),
             model_lr=LinearAnnealing(3e-4, 0.0, total_timestep // (rollout_len * n_envs)),
             check_reparam_consistency=False,
-            use_log_likelihood=True,
-            use_reparameterization=False,
-            policy_loss_beta=LinearAnnealing(1.0, 0.1, 200_000 // (rollout_len * n_envs)),
+            use_log_likelihood=False,
+            use_reparameterization=True,
+            policy_loss_beta=LinearAnnealing(1.0, 0.1, 100_000 // (rollout_len * n_envs)),
             use_vec_normalization=False,
         ),
         name="ppo",
         n_envs=n_envs,
         total_timesteps=total_timestep,
-        log_interval=100,
+        log_interval=10,
         record_video=False,
         seed=np.random.randint(2**10, 2**30) ,
     )

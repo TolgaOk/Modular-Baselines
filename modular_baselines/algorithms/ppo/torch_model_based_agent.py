@@ -60,7 +60,7 @@ class TorchModelBasedAgent(TorchPPOAgent):
 
             log_prob = dist.log_prob(next_embedding).mean(0)
             recon_loss = torch.nn.functional.mse_loss(th_next_obs, self.model.submersion(dist.rsample()))
-            loss = -(log_prob * 0.001 - recon_loss)
+            loss = -(log_prob - recon_loss)
 
             self.model_optimizer.zero_grad()
             loss.backward()

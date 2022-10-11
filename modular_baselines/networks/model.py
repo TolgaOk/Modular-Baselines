@@ -49,7 +49,6 @@ class BaseModel(torch.nn.Module):
         pass
 
 
-
 class ModelNetwork(BaseModel):
 
     def __init__(self, state_size: int, action_size: int) -> None:
@@ -129,7 +128,7 @@ class StiefelNetwork(BaseModel):
             n_hiddens=1,
             hidden_size=hidden_size,
             non_linearity=lambda: torch.nn.LeakyReLU(negative_slope=0.05),
-            use_final_nonlinearity=True,
+            use_final_nonlinearity=False,
             use_orthogonal_weights=True)
         self.steifel_hidden = self._make_network(
             in_size=hidden_size,
@@ -142,6 +141,7 @@ class StiefelNetwork(BaseModel):
         )
 
         self.layer_action_input = torch.nn.Linear(action_size, hidden_size, bias=True)
+        self.embed_activation = ModRelu(hidden_size)
         geotorch.orthogonal(self.layer_action_input, "weight")
 
         self.std_parameters = torch.nn.Parameter(torch.zeros(1, hidden_size))
@@ -161,13 +161,14 @@ class StiefelNetwork(BaseModel):
             elif isinstance(layer, torch.nn.Tanh):
                 output = torch.atanh(output)
             elif isinstance(layer, torch.nn.LeakyReLU):
-                output = torch.nn.functional.leaky_relu(output, negative_slope=1/layer.negative_slope)
+                output = torch.nn.functional.leaky_relu(
+                    output, negative_slope=1/layer.negative_slope)
             else:
                 raise RuntimeError(f"Unknown layer: {layer.__class__.__name__}")
         return output
 
     def forward(self, state_embed: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        feature = torch.tanh(self.layer_action_input(action)) + state_embed #self.state_activation(state_embed)
+        feature = torch.tanh(self.layer_action_input(action)) + self.embed_activation(state_embed)
         hidden = self.steifel_hidden(feature)
 
         std_parameters = torch.exp(self.std_parameters.expand_as(hidden))
@@ -198,5 +199,3 @@ class StiefelNetwork(BaseModel):
         if not use_final_nonlinearity:
             layers.pop()
         return torch.nn.Sequential(*layers)
-
-
