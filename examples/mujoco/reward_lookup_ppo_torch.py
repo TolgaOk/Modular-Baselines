@@ -15,8 +15,10 @@ from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 from torch_setup import MujocoTorchConfig, pre_setup, parallel_run, add_arguments
 from unitgym.reward_lookup import DelayedRewardLookUp
 
+post_seed = np.random.randint(2**30)
 np.random.seed(500)
 random_rewards = np.random.uniform(-1, 1, 50)
+np.random.seed(post_seed)
 
 known_envs = {
     "10-8": lambda: DelayedRewardLookUp(10, 8, np.zeros(1) + 0.5),
@@ -81,7 +83,7 @@ def make_config(env_length: int) -> MujocoTorchConfig:
 
     rollout_len = env_length
     n_envs = 500 // env_length
-    total_timestep = 1_000_000
+    total_timestep = 3_000_000
 
     return MujocoTorchConfig(
         args=ValueGradientPPOArgs(
@@ -91,8 +93,8 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             value_coef=0.5,
             gamma=0.99,
             gae_lambda=1.0,
-            policy_epochs=10,
-            model_epochs=100,
+            policy_epochs=1,
+            model_epochs=25,
             max_grad_norm=1.0,
             buffer_size=2048 * 256,
             normalize_advantage=True,
@@ -104,15 +106,15 @@ def make_config(env_length: int) -> MujocoTorchConfig:
             check_reparam_consistency=False,
             use_log_likelihood=False,
             use_reparameterization=True,
-            policy_loss_beta=LinearAnnealing(1.0, 0.1, 100_000 // (rollout_len * n_envs)),
+            policy_loss_beta=LinearAnnealing(1.0, 0.1, 200_000 // (rollout_len * n_envs)),
             use_vec_normalization=False,
         ),
         name="ppo",
         n_envs=n_envs,
         total_timesteps=total_timestep,
-        log_interval=10,
+        log_interval=100,
         record_video=False,
-        seed=np.random.randint(2**10, 2**30) ,
+        seed=np.random.randint(2**10, 2**30),
     )
 
 
