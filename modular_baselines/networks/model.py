@@ -95,8 +95,6 @@ class ModRelu(torch.nn.Module):
         self.b.data.uniform_(-0.01, 0.01)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        # return torch.abs(inputs) + self.b
-        # return inputs
         return self._forward(inputs, self.b)
 
     @staticmethod
@@ -129,7 +127,8 @@ class StiefelNetwork(BaseModel):
             hidden_size=hidden_size,
             non_linearity=lambda: torch.nn.LeakyReLU(negative_slope=0.05),
             use_final_nonlinearity=False,
-            use_orthogonal_weights=True)
+            use_orthogonal_weights=True,
+            bias=False)
         self.steifel_hidden = self._make_network(
             in_size=hidden_size,
             out_size=hidden_size,
@@ -137,13 +136,13 @@ class StiefelNetwork(BaseModel):
             hidden_size=hidden_size,
             non_linearity=lambda: ModRelu(hidden_size),
             use_final_nonlinearity=False,
-            use_orthogonal_weights=True
+            use_orthogonal_weights=True,
+            bias=True
         )
 
         self.layer_action_input = torch.nn.Linear(action_size, hidden_size, bias=True)
-        self.embed_activation = ModRelu(hidden_size)
         geotorch.orthogonal(self.layer_action_input, "weight")
-
+        self.embed_activation = ModRelu(hidden_size)
         self.std_parameters = torch.nn.Parameter(torch.zeros(1, hidden_size))
 
     def immersion(self, state: torch.Tensor) -> torch.Tensor:
@@ -176,7 +175,7 @@ class StiefelNetwork(BaseModel):
 
     def dist(self, parameters: torch.Tensor) -> torch.distributions.Distribution:
         mean, std = parameters.split(parameters.shape[-1] // 2, dim=-1)
-        dist = torch.distributions.Normal(loc=mean, scale=std + 0.05)
+        dist = torch.distributions.Normal(loc=mean, scale=std + 0.01)
         dist = torch.distributions.independent.Independent(dist, 1)
         return dist
 
@@ -187,11 +186,12 @@ class StiefelNetwork(BaseModel):
                       hidden_size: int,
                       non_linearity: Type[torch.nn.Module],
                       use_final_nonlinearity: bool,
-                      use_orthogonal_weights: bool) -> torch.nn.Sequential:
+                      use_orthogonal_weights: bool,
+                      bias: bool) -> torch.nn.Sequential:
         layers = []
         hidden_sizes = ([hidden_size] * n_hiddens)
         for (in_s, out_s) in zip([in_size, *hidden_sizes], [*hidden_sizes, out_size]):
-            layer = torch.nn.Linear(in_s, out_s)
+            layer = torch.nn.Linear(in_s, out_s, bias=bias)
             if use_orthogonal_weights:
                 geotorch.orthogonal(layer, "weight")
             layers.append(layer)
