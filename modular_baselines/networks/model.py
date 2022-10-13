@@ -109,7 +109,7 @@ class ModRelu(torch.nn.Module):
 
 class StiefelNetwork(BaseModel):
 
-    def __init__(self, state_size: int, action_size: int, hidden_size: int = 200, n_layers: int = 2) -> None:
+    def __init__(self, state_size: int, action_size: int, hidden_size: int = 128, n_layers: int = 1) -> None:
         super().__init__(state_size, action_size)
         if action_size > hidden_size:
             raise ValueError(
@@ -123,7 +123,7 @@ class StiefelNetwork(BaseModel):
         self.encoding = self._make_network(
             in_size=state_size,
             out_size=hidden_size,
-            n_hiddens=1,
+            n_hiddens=0,
             hidden_size=hidden_size,
             non_linearity=lambda: torch.nn.LeakyReLU(negative_slope=0.05),
             use_final_nonlinearity=False,
