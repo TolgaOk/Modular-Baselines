@@ -6,6 +6,7 @@ import sys
 from multiprocessing import Process, Queue
 from dataclasses import dataclass
 import argparse
+import time
 import gym
 from datetime import datetime
 
@@ -165,6 +166,7 @@ def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm
                  for rank in range(n_procs)]
 
     for proc in processes:
+        time.sleep(1.5) # To avoid having same log name
         proc.start()
 
     for proc in processes:
