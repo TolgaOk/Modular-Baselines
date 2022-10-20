@@ -16,6 +16,7 @@ from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, JSONOutputFormat
 from stable_baselines3.common.vec_env.vec_video_recorder import VecVideoRecorder
+from stable_baselines3.common.running_mean_std import RunningMeanStd
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithm
 from modular_baselines.algorithms.agent import BaseAgent
@@ -73,11 +74,13 @@ def pre_setup(experiment_name: str,
         wrapper_class=None,
         vec_env_cls=SubprocVecEnv)
     if config.args.use_vec_normalization:
-        vecenv = VecNormalize(vecenv,
-         training=True,
-         gamma=config.args.gamma,
-         clip_obs=1e5,
-         clip_reward=1e5,)
+        vecenv = VecNormalize(
+            vecenv,
+            training=True,
+            gamma=config.args.gamma,
+            **config.args.vec_norm_info)
+        if config.args.vec_norm_info["norm_obs"] is False:
+            vecenv.obs_rms = RunningMeanStd(shape=vecenv.observation_space.shape)
     if config.record_video:
         vecenv = VecVideoRecorder(
             vecenv,
@@ -155,8 +158,8 @@ def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm
         configs = [configs]
 
     arguments = [dict(env_name=env_name, config=config, experiment_name=experiment_name)
-                for env_name in env_names
-                for config in configs]
+                 for env_name in env_names
+                 for config in configs]
 
     argument_queue = Queue()
     for arg in arguments:
@@ -166,7 +169,7 @@ def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm
                  for rank in range(n_procs)]
 
     for proc in processes:
-        time.sleep(1.5) # To avoid having same log name
+        time.sleep(1.5)  # To avoid having the same log name
         proc.start()
 
     for proc in processes:
