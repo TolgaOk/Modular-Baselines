@@ -4,7 +4,7 @@ import numpy as np
 
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from modular_baselines.algorithms.ppo.ppo import PPO
+from modular_baselines.algorithms.ppo.ppo import PPO, PPOArgs
 from modular_baselines.utils.annealings import Coefficient
 from modular_baselines.collectors.collector import RolloutCollector, BaseCollectorCallback
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
@@ -31,6 +31,7 @@ class ModelBasedPPOArgs():
     policy_lr: Coefficient
     model_lr: Coefficient
     use_vec_normalization: bool
+    vec_norm_info: Dict[str, Union[float, bool, int, str]]
 
 
 class ModelBasedPPO(PPO):
@@ -125,9 +126,20 @@ class ValueGradientPPOArgs(ModelBasedPPOArgs):
     mini_rollout_size: int
     use_reparameterization: bool
     policy_loss_beta: Coefficient
+    pre_trained_model: Union[str, None]
 
 
 class ValueGradientPPO(ModelBasedPPO):
+
+    def __init__(self,
+                 agent: BaseAgent,
+                 collector: RolloutCollector,
+                 args: PPOArgs,
+                 logger: DataLogger,
+                 callbacks: Optional[Union[List[BaseAlgorithmCallback], BaseAlgorithmCallback]] = None):
+        super().__init__(agent, collector, args, logger, callbacks)
+        if args.pre_trained_model is not None:
+            agent.load_model(args.pre_trained_model)
 
     def train(self) -> Dict[str, float]:
         """ One step training. This will be called once per rollout.

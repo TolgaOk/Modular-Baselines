@@ -144,6 +144,10 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
                          logger)
         self.target_policy = deepcopy(policy)
 
+    def load_model(self, path: str) -> None:
+        model_state_dict = torch.load(path)
+        self.model.load_state_dict(model_state_dict)
+
     def sample_action(self, observation: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return TorchModelBasedAgent.sample_action(self, observation)
 
