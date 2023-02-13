@@ -67,14 +67,15 @@ class HopperMaker(MujocoMaker):
 
 
 class Walker2dMaker(MujocoMaker):
-    # With div 10 constant normalizer
     @staticmethod
     def make():
         env = gym.make("Walker2d-v4", exclude_current_positions_from_observation=False)
+        # "Divide by 10" normalizer
         return WalkerObsNormalizer(env)
 
     @staticmethod
     def reward(state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor) -> torch.Tensor:
+        # Reverse division by 10
         return MujocoMaker.reward(state * 10, action, next_state * 10)
 
     @staticmethod
@@ -153,7 +154,7 @@ n_envs = 16
 value_gradient_ppo_mujoco_config = [MujocoTorchConfig(
     args=ValueGradientPPOArgs(
         rollout_len=rollout_len,
-        mini_rollout_size=64,
+        mini_rollout_size=8,
         ent_coef=1e-4,
         value_coef=0.5,
         gamma=0.99,
@@ -172,7 +173,7 @@ value_gradient_ppo_mujoco_config = [MujocoTorchConfig(
         check_reparam_consistency=True,
         use_log_likelihood=False,
         use_reparameterization=True,
-        policy_loss_beta=LinearAnnealing(1.0, 0.1, 5_000_000 // (rollout_len * n_envs)),
+        policy_loss_beta=LinearAnnealing(1.0, 0.6, 2_000_000 // (rollout_len * n_envs)),
         use_vec_normalization=True,
         vec_norm_info={
             "norm_reward": True,

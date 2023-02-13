@@ -287,7 +287,8 @@ class TorchValueGradientAgent(TorchModelBasedAgent):
         orig_next_obs = next_obs * torch.sqrt(next_obs_rms_var + epsilon) + next_obs_rms_mean
         # TODO!!!: Clipping actions remove gradient for clipped values!
         orig_act = torch.clamp(act, -1, 1)
-        return reward_fn(orig_obs, orig_act, orig_next_obs) / torch.sqrt(reward_rms_var + epsilon)
+        re_orig_act = act + (orig_act - act).detach()
+        return reward_fn(orig_obs, re_orig_act, orig_next_obs) / torch.sqrt(reward_rms_var + epsilon)
 
     def update_policy_parameters(self,
                                  sample: np.ndarray,
