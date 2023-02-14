@@ -47,6 +47,7 @@ class RecurrentRolloutCollector(RolloutCollector):
                  buffer: BaseBuffer,
                  agent: BaseAgent,
                  logger: DataLogger,
+                 store_normalizer_stats: bool = False,
                  callbacks: Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]] = None):
         # Add Hidden resetting callback for handling terminations
         reset_callback = ResetHiddenCallback()
@@ -63,7 +64,7 @@ class RecurrentRolloutCollector(RolloutCollector):
             *self._last_hidden_state.keys(),
             *[f"next_{name}" for name in self._last_hidden_state.keys()]
         )
-        super().__init__(env, buffer, agent, logger, callbacks)
+        super().__init__(env, buffer, agent, logger, store_normalizer_stats, callbacks)
 
     def get_actions(self):
         actions, hidden_states, policy_content = self.agent.sample_action(

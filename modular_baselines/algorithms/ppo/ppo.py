@@ -29,6 +29,8 @@ class PPOArgs():
     batch_size: int
     max_grad_norm: float
     normalize_advantage: bool
+    use_vec_normalization: bool
+    vec_norm_info: Dict[str, Union[float, bool, int, str]]
 
 
 class PPO(OnPolicyAlgorithm):
@@ -84,6 +86,15 @@ class PPO(OnPolicyAlgorithm):
               ) -> "PPO":
         observation_space, action_space, action_dim = PPO._setup(env)
 
+        normalizer_struct = []
+        if args.use_vec_normalization:
+            normalizer_struct = [
+                ("reward_rms_var", np.float32, (1,)),
+                ("obs_rms_mean", np.float32, observation_space.shape),
+                ("obs_rms_var", np.float32, observation_space.shape),
+                ("next_obs_rms_mean", np.float32, observation_space.shape),
+                ("next_obs_rms_var", np.float32, observation_space.shape),
+            ]
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
@@ -91,9 +102,17 @@ class PPO(OnPolicyAlgorithm):
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
             ("old_log_prob", np.float32, (1,)),
+            *normalizer_struct
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
-        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        collector = RolloutCollector(
+            env=env,
+            buffer=buffer,
+            agent=agent,
+            logger=data_logger,
+            store_normalizer_stats=args.use_vec_normalization,
+            callbacks=collector_callbacks
+        )
         return PPO(
             agent=agent,
             collector=collector,
@@ -140,6 +159,15 @@ class LstmPPO(PPO):
         """
         observation_space, action_space, action_dim = PPO._setup(env)
 
+        normalizer_struct = []
+        if args.use_vec_normalization:
+            normalizer_struct = [
+                ("reward_rms_var", np.float32, (1,)),
+                ("obs_rms_mean", np.float32, observation_space.shape),
+                ("obs_rms_var", np.float32, observation_space.shape),
+                ("next_obs_rms_mean", np.float32, observation_space.shape),
+                ("next_obs_rms_var", np.float32, observation_space.shape),
+            ]
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
@@ -150,11 +178,18 @@ class LstmPPO(PPO):
             *[(name, np.float32, array.shape[1:])
               for name, array in agent.init_hidden_state(1).items()],
             *[(f"next_{name}", np.float32, array.shape[1:])
-              for name, array in agent.init_hidden_state(1).items()]
+              for name, array in agent.init_hidden_state(1).items()],
+            *normalizer_struct
         ])
 
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
-        collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        collector = RecurrentRolloutCollector(
+            env=env,
+            buffer=buffer,
+            agent=agent,
+            logger=data_logger,
+            store_normalizer_stats=args.use_vec_normalization,
+            callbacks=collector_callbacks)
         return LstmPPO(
             agent=agent,
             collector=collector,
@@ -162,7 +197,7 @@ class LstmPPO(PPO):
             logger=data_logger,
             callbacks=algorithm_callbacks,
         )
-    
+
     def train(self) -> Dict[str, float]:
         """ One step training. This will be called once per rollout.
 

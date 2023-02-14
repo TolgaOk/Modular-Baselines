@@ -68,7 +68,7 @@ class TorchLstmA2CAgent(TorchA2CAgent, BaseRecurrentAgent):
                                 time, grad.norm(dim=-1, p="fro").mean(0).item()), step, name))
                 # For forward values
                 getattr(self.logger, f"dict/time_sequence/forward_{name}").add(
-                                step, hidden.norm(dim=-1, p="fro").mean(0).item())
+                    step, hidden.norm(dim=-1, p="fro").mean(0).item())
 
             # Checking for consistency
             for name, hidden_tensor in th_hidden_states.items():

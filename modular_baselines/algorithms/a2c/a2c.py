@@ -24,6 +24,8 @@ class A2CArgs():
     lr: Coefficient
     max_grad_norm: float
     normalize_advantage: bool
+    use_vec_normalization: bool
+    vec_norm_info: Dict[str, Union[float, bool, int, str]]
 
 
 class A2C(OnPolicyAlgorithm):
@@ -104,15 +106,31 @@ class A2C(OnPolicyAlgorithm):
         """
         observation_space, action_space, action_dim = A2C._setup(env)
 
+        normalizer_struct = []
+        if args.use_vec_normalization:
+            normalizer_struct = [
+                ("reward_rms_var", np.float32, (1,)),
+                ("obs_rms_mean", np.float32, observation_space.shape),
+                ("obs_rms_var", np.float32, observation_space.shape),
+                ("next_obs_rms_mean", np.float32, observation_space.shape),
+                ("next_obs_rms_var", np.float32, observation_space.shape),
+            ]
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
             ("action", action_space.dtype, (action_dim,)),
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
+            *normalizer_struct
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
-        collector = RolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        collector = RolloutCollector(
+            env=env,
+            buffer=buffer,
+            agent=agent,
+            logger=data_logger,
+            store_normalizer_stats=args.use_vec_normalization,
+            callbacks=collector_callbacks)
         return A2C(
             agent=agent,
             collector=collector,
@@ -153,6 +171,15 @@ class LstmA2C(A2C):
         """
         observation_space, action_space, action_dim = A2C._setup(env)
 
+        normalizer_struct = []
+        if args.use_vec_normalization:
+            normalizer_struct = [
+                ("reward_rms_var", np.float32, (1,)),
+                ("obs_rms_mean", np.float32, observation_space.shape),
+                ("obs_rms_var", np.float32, observation_space.shape),
+                ("next_obs_rms_mean", np.float32, observation_space.shape),
+                ("next_obs_rms_var", np.float32, observation_space.shape),
+            ]
         struct = np.dtype([
             ("observation", np.float32, observation_space.shape),
             ("next_observation", np.float32, observation_space.shape),
@@ -166,7 +193,14 @@ class LstmA2C(A2C):
         ])
 
         buffer = Buffer(struct, args.rollout_len, env.num_envs, data_logger, buffer_callbacks)
-        collector = RecurrentRolloutCollector(env, buffer, agent, data_logger, collector_callbacks)
+        collector = RecurrentRolloutCollector(
+            env=env,
+            buffer=buffer,
+            agent=agent,
+            logger=data_logger,
+            store_normalizer_stats=args.use_vec_normalization,
+            callbacks=collector_callbacks
+        )
         return LstmA2C(
             agent=agent,
             collector=collector,

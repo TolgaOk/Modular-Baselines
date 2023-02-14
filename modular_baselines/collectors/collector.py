@@ -58,9 +58,9 @@ class RolloutCollector(BaseCollector):
                  buffer: BaseBuffer,
                  agent: BaseAgent,
                  logger: DataLogger,
+                 store_normalizer_stats: bool = False,
                  callbacks: Optional[Union[List[BaseCollectorCallback],
-                                           BaseCollectorCallback]] = None,
-                 store_normalizer_stats: bool = False):
+                                           BaseCollectorCallback]] = None):
         self.env = env
         self.buffer = buffer
         self.agent = agent
