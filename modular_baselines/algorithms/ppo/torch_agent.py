@@ -83,7 +83,7 @@ class TorchPPOAgent(TorchAgent):
                           max_grad_norm: float,
                           normalize_advantage: bool,
                           ) -> Dict[str, float]:
-        """ Pytorch A2C parameter update method """
+        """ Pytorch PPO parameter update method """
 
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
@@ -107,9 +107,9 @@ class TorchPPOAgent(TorchAgent):
                 value_loss = torch.nn.functional.mse_loss(values, returns)
 
                 ratio = torch.exp(log_probs - old_log_prob.detach())
-                surrugate_loss_1 = advantages * ratio
-                surrugate_loss_2 = advantages * torch.clamp(ratio, 1 - clip_value, 1 + clip_value)
-                policy_loss = -torch.minimum(surrugate_loss_1, surrugate_loss_2).mean()
+                surrogate_loss_1 = advantages * ratio
+                surrogate_loss_2 = advantages * torch.clamp(ratio, 1 - clip_value, 1 + clip_value)
+                policy_loss = -torch.minimum(surrogate_loss_1, surrogate_loss_2).mean()
                 entropy_loss = -entropies.mean()
                 loss = value_loss * value_coef + policy_loss + entropy_loss * ent_coef
 

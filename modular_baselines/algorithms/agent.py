@@ -44,6 +44,10 @@ class BaseAgent(Component):
     def eval_mode(self):
         pass
 
+    @abstractmethod
+    def save(self, path: str) -> None:
+        pass
+
 
 class BaseRecurrentAgent(Component):
 
@@ -99,4 +103,14 @@ class TorchAgent(BaseAgent):
     def param_dict_as_numpy(self) -> Dict[str, np.ndarray]:
         return {name: param.detach().cpu().numpy()
                 for name, param in self.policy.named_parameters()}
-            
+
+    def grad_dict_as_numpy(self) -> Dict[str, np.ndarray]:
+        return {name: param.grad.cpu().numpy() if param.grad is not None else param.grad
+                for name, param in self.policy.named_parameters}
+
+    def save(self, path: str) -> None:
+        torch.save({
+            "policy_state_dict": self.policy.state_dict(),
+            "policy_optimizer_state_dict": self.optimizer.state_dict(),
+        },
+            path)

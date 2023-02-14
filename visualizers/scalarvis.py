@@ -140,7 +140,8 @@ class ScalarRender():
             self.fig,
         ],
             layout=Layout(
-                width="46%",
+                flex="1 1 46%",
+                margin="10px",
                 height="460px",
                 display="flex",
                 flex_flow="column",
@@ -336,7 +337,8 @@ class MultiScalarRender(ScalarRender):
             self.fig,
         ],
             layout=Layout(
-                width="46%",
+                margin="10px",
+                flex="1 1 46%",
                 height="460px",
                 display="flex",
                 flex_flow="column",
@@ -348,11 +350,12 @@ class MultiScalarRender(ScalarRender):
 
 class ComparisonScalarRender(MultiScalarRender):
 
-    def __init__(self, logs_dir):
+    def __init__(self, logs_dir, directories = None):
         if not os.path.exists(logs_dir):
             raise FileNotFoundError("Logs directory does not exist")
+        directories = directories or os.listdir(logs_dir)
 
-        self.log_dirs = [name for name in os.listdir(logs_dir)
+        self.log_dirs = [name for name in directories
                          if os.path.isdir(os.path.join(logs_dir, name))]
         if len(self.log_dirs) == 0:
             FileNotFoundError("Empty directory")
@@ -498,7 +501,8 @@ class ComparisonScalarRender(MultiScalarRender):
             ])
         ],
             layout=Layout(
-            width="96%",
+            margin="10px",
+            flex="1 1 98%",
             height="600px",
             display="flex",
             flex_flow="column",

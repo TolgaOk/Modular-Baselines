@@ -2,12 +2,15 @@ from typing import Any, Callable, Dict, List, Optional, Union, Type, Union
 import time
 from collections import deque
 import numpy as np
+import pickle
 import os
 import json
-from collections import defaultdict
-from abc import ABC, abstractmethod
+import dataclasses
 
 from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
+from stable_baselines3.common.vec_env.base_vec_env import VecEnvWrapper
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 
 from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
 from modular_baselines.collectors.collector import BaseCollectorCallback
@@ -92,23 +95,63 @@ class DictWriter(BaseWriter):
                         json_file.write(json_str + "\n")
 
 
-class LogHyperparameters(BaseAlgorithmCallback):
+class SaveModelParametersWriter(BaseWriter):
+
+    prefix: str = "network"
 
     def __init__(self,
-                 log_dir: str,
-                 hyperparameters: Dict[str, Any],
-                 file_name: str = "hyperparameters.json"):
+                 interval: int,
+                 dir_path: str):
+        super().__init__()
+        self.interval = interval
+        self.dir = os.path.join(dir_path, self.prefix)
+        os.makedirs(self.dir, exist_ok=True)
+
+    def on_step(self, locals_: Dict[str, Any]) -> bool:
+
+        iteration = locals_["iteration"]
+        if iteration % self.interval == 0:
+            agent = locals_["self"].agent
+            vecenv = locals_["self"].collector.env
+            agent.save(os.path.join(self.dir, f"params_{iteration}.b"))
+            if self.is_vec_env(vecenv):
+                with open(os.path.join(self.dir, f"env_norm_{iteration}.b"), "wb") as fobj:
+                    pickle.dump(vecenv.__getstate__(), fobj)
+
+    def is_vec_env(self, vecenv: Union[VecEnv, VecEnvWrapper]) -> bool:
+        is_vec_normalize = False
+        while isinstance(vecenv, VecEnvWrapper):
+            if isinstance(vecenv, VecNormalize):
+                is_vec_normalize = True
+                break
+            vecenv = vecenv.venv
+        return is_vec_normalize
+        
+
+
+class LogConfigs():
+
+    prefix: str = "config"
+
+    def __init__(self,
+                 config: Any,
+                 dir_path: str,
+                 file_name: str = "config.json"
+                 ) -> None:
+        super().__init__()
+        self.dir = os.path.join(dir_path, self.prefix)
         self.file_name = file_name
-        self.log_dir = log_dir
-        self.hyperparameters = hyperparameters
+        os.makedirs(self.dir, exist_ok=True)
 
-    def on_training_start(self, *args) -> None:
-        path = os.path.join(self.log_dir, self.file_name)
+        self.write(config)
+
+    def write(self, config: Any) -> None:
+        path = os.path.join(self.dir, self.file_name)
         with open(path, "w") as fobj:
-            json.dump(self.hyperparameters, fobj)
+            json.dump(config, fobj, default=self.serializer)
 
-    def on_training_end(self, *args) -> None:
-        pass
-
-    def on_step(self, *args) -> None:
-        pass
+    @staticmethod
+    def serializer(obj: Any):
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        return obj.jsonize()
