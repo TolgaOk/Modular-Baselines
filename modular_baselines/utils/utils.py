@@ -1,0 +1,52 @@
+from typing import Optional, Any, Dict, Tuple, Union, List, Callable
+import torch
+import numpy as np
+from gym import spaces
+
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+
+
+
+def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
+    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
+        if isinstance(collection, dict):
+            return {name: nested_apply(self, value, **kwargs) for name, value in collection.items()}
+        if isinstance(collection, (list, tuple)):
+            cls = type(collection)
+            return cls([nested_apply(self, value, **kwargs) for value in collection])
+        if isinstance(collection, (torch.Tensor, np.ndarray)):
+            return function(self, collection, **kwargs)
+        raise ValueError(f"Type {type(collection)} is not supported!")
+    return nested_apply
+
+
+@nested
+def to_torch(device: str, ndarray: np.ndarray):
+    return torch.from_numpy(ndarray).to(device)
+
+@nested
+def flatten_time(tensor: torch.Tensor) -> torch.Tensor:
+    n_envs, n_rollout = tensor.shape[:2]
+    return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
+
+def param_dict_as_numpy(named_parameters) -> Dict[str, np.ndarray]:
+    return {name: param.detach().cpu().numpy()
+            for name, param in named_parameters}
+
+def grad_dict_as_numpy(named_parameters) -> Dict[str, np.ndarray]:
+    return {name: param.grad.cpu().numpy() if param.grad is not None else param.grad
+            for name, param in named_parameters}
+
+def get_spaces(env: VecEnv):
+    # TODO: Add different observation spaces
+    observation_space = env.observation_space
+    # TODO: Add different action spaces
+    action_space = env.action_space
+
+    if not isinstance(observation_space, spaces.Box):
+        raise NotImplementedError("Only Box observations are available")
+    if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
+        raise NotImplementedError("Only Discrete and Box actions are available")
+
+    action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+    return observation_space, action_space, action_dim
