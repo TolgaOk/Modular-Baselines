@@ -60,7 +60,8 @@ class Buffer(BaseBuffer):
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
-        super().__init__(logger)
+        self.logger = logger
+        self._init_default_loggers()
 
         if not isinstance(callbacks, (list, tuple)):
             callbacks = [callbacks] if callbacks is not None else []

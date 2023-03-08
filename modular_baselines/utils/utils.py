@@ -8,21 +8,23 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 
 def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
-    def nested_apply(self, collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
+    def nested_apply(collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
         if isinstance(collection, dict):
-            return {name: nested_apply(self, value, **kwargs) for name, value in collection.items()}
+            return {name: nested_apply(value, **kwargs) for name, value in collection.items()}
         if isinstance(collection, (list, tuple)):
             cls = type(collection)
-            return cls([nested_apply(self, value, **kwargs) for value in collection])
+            return cls([nested_apply(value, **kwargs) for value in collection])
         if isinstance(collection, (torch.Tensor, np.ndarray)):
-            return function(self, collection, **kwargs)
+            return function(collection, **kwargs)
         raise ValueError(f"Type {type(collection)} is not supported!")
     return nested_apply
 
 
-@nested
 def to_torch(device: str, ndarray: np.ndarray):
-    return torch.from_numpy(ndarray).to(device)
+    @nested
+    def _to_torch(ndarray):
+        return torch.from_numpy(ndarray).to(device)
+    return _to_torch(ndarray)
 
 @nested
 def flatten_time(tensor: torch.Tensor) -> torch.Tensor:

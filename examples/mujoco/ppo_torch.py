@@ -2,8 +2,7 @@ from typing import Any, Dict
 from argparse import ArgumentParser
 import numpy as np
 
-from modular_baselines.algorithms.ppo.ppo import PPO, PPOArgs
-from modular_baselines.algorithms.ppo.torch_agent import TorchPPOAgent
+from modular_baselines.algorithms.ppo.ppo import PPO, PPOArgs, PPOAgent
 from modular_baselines.networks.network import SeparateFeatureNetwork
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 
@@ -11,7 +10,7 @@ from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
 
 
 def ppo_setup(env_name: str, config: Dict[str, Any], experiment_name: str, device: str):
-    return setup(PPO, TorchPPOAgent, SeparateFeatureNetwork, experiment_name, env_name, config, device)
+    return setup(PPO, PPOAgent, SeparateFeatureNetwork, experiment_name, env_name, config, device)
 
 
 ppo_mujoco_config = MujocoTorchConfig(

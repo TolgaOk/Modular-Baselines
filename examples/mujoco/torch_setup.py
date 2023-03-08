@@ -18,7 +18,7 @@ from stable_baselines3.common.logger import HumanOutputFormat, CSVOutputFormat, 
 from stable_baselines3.common.vec_env.vec_video_recorder import VecVideoRecorder
 from stable_baselines3.common.running_mean_std import RunningMeanStd
 
-from modular_baselines.algorithms.algorithm import BaseAlgorithm
+from modular_baselines.algorithms.ppo.ppo import PPO
 from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.loggers.writers import ScalarWriter, DictWriter, BaseWriter, SaveModelParametersWriter, LogConfigs
 from modular_baselines.loggers.data_logger import DataLogger
@@ -92,14 +92,14 @@ def pre_setup(experiment_name: str,
     return data_logger, logger_callbacks, vecenv
 
 
-def setup(algorithm_cls: Type[BaseAlgorithm],
+def setup(algorithm_cls: Type[PPO],
           agent_cls: Type[BaseAgent],
           network: Type[torch.nn.Module],
           experiment_name: str,
           env_name: str,
           config: MujocoTorchConfig,
           device: str
-          ) -> BaseAlgorithm:
+          ) -> PPO:
 
     experiment_name = "-".join([experiment_name, algorithm_cls.__name__])
     data_logger, logger_callbacks, vecenv = pre_setup(experiment_name, env_name, config)
@@ -119,9 +119,7 @@ def setup(algorithm_cls: Type[BaseAlgorithm],
         agent=agent,
         data_logger=data_logger,
         args=config.args,
-        buffer_callbacks=None,
-        collector_callbacks=None,
-        algorithm_callbacks=logger_callbacks)
+        writers=logger_callbacks)
 
     learner.learn(total_timesteps=config.total_timesteps)
     return learner
@@ -146,7 +144,7 @@ def worker(setup_fn, argument_queue: Queue, rank: int, cuda_devices) -> None:
         setup_fn(device=device, **kwargs)
 
 
-def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], BaseAlgorithm],
+def parallel_run(setup_fn: Callable[[str, MujocoTorchConfig, int], PPO],
                  configs: Union[MujocoTorchConfig, Iterable[MujocoTorchConfig]],
                  experiment_name: str,
                  n_procs: int,

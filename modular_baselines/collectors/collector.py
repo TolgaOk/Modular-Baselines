@@ -65,7 +65,8 @@ class RolloutCollector(BaseCollector):
         self.buffer = buffer
         self.agent = agent
         self.store_normalizer_stats = store_normalizer_stats
-        super().__init__(logger)
+        self.logger = logger
+        self._init_default_loggers()
 
         for field in self._required_buffer_fields:
             assert field in buffer.struct.names, (
