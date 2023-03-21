@@ -174,6 +174,8 @@ class DataLogger():
     def __setattr__(self, __name: str, __value: Any) -> None:
         if isinstance(__value, BaseDataLog):
             self.__dict__[__name] = __value
+        if __name in self.__dict__.keys():
+            raise ValueError(f"DataLog can not be reassigned or the name <{__name}> already exist.")
         else:
             raise ValueError(f"Only DataLogs are supported for assignments, given type: {type(__value)}")
 
