@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import Any, Dict
 from argparse import ArgumentParser
 import multiprocessing as mp
@@ -9,7 +10,6 @@ from modular_baselines.networks.network import LSTMSeparateNetwork
 from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
 
 from torch_setup import MujocoTorchConfig, setup, parallel_run, add_arguments
-
 
 def lstm_ppo_setup(env_name: str, config: Dict[str, Any], experiment_name: str, device: str):
     return setup(LstmPPO, TorchLstmPPOAgent, LSTMSeparateNetwork, experiment_name, env_name, config, device)

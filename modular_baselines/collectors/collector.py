@@ -1,5 +1,4 @@
-
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any, Tuple, Protocol
 import numpy as np
 from gym.spaces import Discrete, Box
 from abc import ABC, abstractmethod
@@ -7,36 +6,26 @@ from abc import ABC, abstractmethod
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
 
-from modular_baselines.component import Component
 from modular_baselines.buffers.buffer import BaseBuffer
-from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.data_logger import DataLogger, ListDataLog, HistListDataLog
+from modular_baselines.loggers.datalog import ListDataLog, SingularDataLog, HistogramDataLog
 
 
-class BaseCollectorCallback(ABC):
-    """ Base class for buffer callbacks that only supports:
-    on_rollout_start, on_rollout_step, and on_rollout_end calls.
-    """
-
-    @abstractmethod
-    def on_rollout_start(self, *args) -> None:
-        pass
-
-    @abstractmethod
-    def on_rollout_step(self, *args) -> None:
-        pass
-
-    @abstractmethod
-    def on_rollout_end(self, *args) -> None:
-        pass
-
-
-class BaseCollector(Component):
+class BaseCollector():
     """ Base abstract class for collectors """
 
     @abstractmethod
     def collect(self, n_rollout_steps: int) -> int:
         pass
+
+
+class Agent(Protocol):
+    def sample_action(self, observation: np.ndarray) -> np.ndarray: ...
+
+
+class RolloutLogger(Protocol):
+    env_reward: ListDataLog
+    env_length: ListDataLog
+    actions: HistogramDataLog
 
 
 class RolloutCollector(BaseCollector):
@@ -45,9 +34,8 @@ class RolloutCollector(BaseCollector):
     Args:
         env (VecEnv): Vectorized environment
         buffer (BaseBuffer): Buffer to push rollout experiences
-        agent (BaseAgent): Action sampling agent
-        logger (DataLogger): Data logger to log environment reward and lengths at termination
-        callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector Callback. Defaults to [] (no callbacks).
+        agent (Agent): Action sampling agent
+        logger (RolloutLogger): Data logger to log environment reward and lengths at termination
     """
 
     _required_buffer_fields = ("observation", "next_observation", "reward",
@@ -56,17 +44,14 @@ class RolloutCollector(BaseCollector):
     def __init__(self,
                  env: VecEnv,
                  buffer: BaseBuffer,
-                 agent: BaseAgent,
-                 logger: DataLogger,
-                 store_normalizer_stats: bool = False,
-                 callbacks: Optional[Union[List[BaseCollectorCallback],
-                                           BaseCollectorCallback]] = None):
+                 agent: Agent,
+                 logger: RolloutLogger,
+                 store_normalizer_stats: bool = False):
         self.env = env
         self.buffer = buffer
         self.agent = agent
         self.store_normalizer_stats = store_normalizer_stats
         self.logger = logger
-        self._init_default_loggers()
 
         for field in self._required_buffer_fields:
             assert field in buffer.struct.names, (
@@ -74,18 +59,6 @@ class RolloutCollector(BaseCollector):
 
         self.num_timesteps = 0
         self._last_obs = self.env.reset()
-
-        if not isinstance(callbacks, (list, tuple)):
-            callbacks = [callbacks] if callbacks is not None else []
-        self.callbacks = callbacks
-
-    def _init_default_loggers(self) -> None:
-        loggers = {
-            "scalar/collector/env_reward": ListDataLog(reduce_fn=lambda values: np.mean(values)),
-            "scalar/collector/env_length": ListDataLog(reduce_fn=lambda values: np.mean(values)),
-            "dict/histogram/actions": HistListDataLog(n_bins=10, reduce_fn=lambda values: {"action": np.stack(values)}),
-        }
-        self.logger.add_if_not_exists(loggers)
 
     def collect(self, n_rollout_steps: int) -> int:
         """ Collect a rollout of experience using the agent and load them to
@@ -99,16 +72,15 @@ class RolloutCollector(BaseCollector):
         """
 
         n_steps = 0
-        for callback in self.callbacks:
-            callback.on_rollout_start(locals())
-
         while n_steps < n_rollout_steps:
 
             actions, policy_content = self.get_actions()
             normalizer_stats = {}
             if self.store_normalizer_stats:
-                normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_mean"] = np.expand_dims(
+                    self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_var"] = np.expand_dims(
+                    self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
             new_obs, rewards, dones, infos = self.environment_step(actions)
             next_obs = new_obs
@@ -123,9 +95,12 @@ class RolloutCollector(BaseCollector):
             n_steps += 1
 
             if self.store_normalizer_stats:
-                normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(1, -1).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["next_obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["next_obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(
+                    1, -1).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_mean"] = np.expand_dims(
+                    self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_var"] = np.expand_dims(
+                    self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
             self.buffer.push({
                 "observation": self._last_obs,
@@ -141,18 +116,11 @@ class RolloutCollector(BaseCollector):
             for idx, info in enumerate(infos):
                 maybe_ep_info = info.get("episode")
                 if maybe_ep_info is not None:
-                    getattr(self.logger, "scalar/collector/env_reward").push(maybe_ep_info["r"])
-                    getattr(self.logger, "scalar/collector/env_length").push(maybe_ep_info["l"])
+                    self.logger.env_reward.push(maybe_ep_info["r"])
+                    self.logger.env_length.push(maybe_ep_info["l"])
             # Logging actions for histogram
-            getattr(self.logger, "dict/histogram/actions").push(actions)
-
+            self.logger.actions.push(actions)
             self._last_obs = new_obs
-
-            for callback in self.callbacks:
-                callback.on_rollout_step(locals())
-
-        for callback in self.callbacks:
-            callback.on_rollout_end(locals())
 
         return self.num_timesteps
 

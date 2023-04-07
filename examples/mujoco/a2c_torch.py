@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import Any, Dict
 from argparse import ArgumentParser
 import numpy as np

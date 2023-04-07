@@ -6,7 +6,6 @@ from gym import spaces
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 
-
 def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
     def nested_apply(collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
         if isinstance(collection, dict):
@@ -26,18 +25,22 @@ def to_torch(device: str, ndarray: np.ndarray):
         return torch.from_numpy(ndarray).to(device)
     return _to_torch(ndarray)
 
+
 @nested
 def flatten_time(tensor: torch.Tensor) -> torch.Tensor:
     n_envs, n_rollout = tensor.shape[:2]
     return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
 
+
 def param_dict_as_numpy(named_parameters) -> Dict[str, np.ndarray]:
     return {name: param.detach().cpu().numpy()
             for name, param in named_parameters}
 
+
 def grad_dict_as_numpy(named_parameters) -> Dict[str, np.ndarray]:
     return {name: param.grad.cpu().numpy() if param.grad is not None else param.grad
             for name, param in named_parameters}
+
 
 def get_spaces(env: VecEnv):
     # TODO: Add different observation spaces
