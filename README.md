@@ -66,7 +66,7 @@ The log files of the runs can be visualized in Jupyter Notebook via visualizers.
 
 ## Maintainers
 
-Modular Baselines has been developed and maintained by [Tolga Ok](https://tolgaok.github.io./) & [Mehmetcan Kaymaz](https://github.com/MehmetcanKaymaz).
+Modular Baselines has been developed and maintained by [Tolga Ok](https://tolgaok.github.io./) & [Abdullah Vanlıoğlu](https://github.com/AbdullahVanlioglu) & [Mehmetcan Kaymaz](https://github.com/MehmetcanKaymaz).
 
 ## Acknowledgments
 
