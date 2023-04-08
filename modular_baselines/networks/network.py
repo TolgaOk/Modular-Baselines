@@ -1,7 +1,7 @@
 from typing import List, Any, Dict, Union, Optional, Tuple, Callable
 import torch
 import numpy as np
-from gym.spaces import Space, Box, Discrete
+from gymnasium.spaces import Space, Box, Discrete
 
 
 class BaseNetwork(torch.nn.Module):

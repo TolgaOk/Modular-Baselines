@@ -1,10 +1,8 @@
 from typing import Optional, Any, Dict, Tuple, Union, List, Callable
 import torch
 import numpy as np
-from gym import spaces
-
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-
+from gymnasium.spaces import Box, Discrete
+from gymnasium.vector import VectorEnv
 
 def nested(function: Callable[[Union[torch.Tensor, np.ndarray]], Union[torch.Tensor, np.ndarray]]):
     def nested_apply(collection: Union[np.ndarray, Dict[str, Any], List[Any], Tuple[Any]], **kwargs):
@@ -42,16 +40,16 @@ def grad_dict_as_numpy(named_parameters) -> Dict[str, np.ndarray]:
             for name, param in named_parameters}
 
 
-def get_spaces(env: VecEnv):
+def get_spaces(env: VectorEnv):
     # TODO: Add different observation spaces
-    observation_space = env.observation_space
+    observation_space = env.single_observation_space
     # TODO: Add different action spaces
-    action_space = env.action_space
+    action_space = env.single_action_space
 
-    if not isinstance(observation_space, spaces.Box):
+    if not isinstance(observation_space, Box):
         raise NotImplementedError("Only Box observations are available")
-    if not isinstance(action_space, (spaces.Box, spaces.Discrete)):
+    if not isinstance(action_space, (Box, Discrete)):
         raise NotImplementedError("Only Discrete and Box actions are available")
 
-    action_dim = action_space.shape[-1] if isinstance(action_space, spaces.Box) else 1
+    action_dim = action_space.shape[-1] if isinstance(action_space, Box) else 1
     return observation_space, action_space, action_dim

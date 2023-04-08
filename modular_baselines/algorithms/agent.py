@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from torch.types import Device
 import torch
-from gym.spaces import Space, Discrete, Box
+from gymnasium.spaces import Space, Discrete, Box
 
 from modular_baselines.loggers.logger import MBLogger
 from modular_baselines.utils.utils import to_torch

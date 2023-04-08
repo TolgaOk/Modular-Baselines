@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import List, Any, Dict, Union, Optional, Tuple, Callable, Type, Iterable
 import torch
 import os

@@ -1,6 +1,6 @@
-stable_baselines3
-gym[atari, box2d, accept-rom-license, mujoco] >= 0.26
+gymnasium[atari, box2d, accept-rom-license, mujoco] == 0.28.1
 torch == 2.0.0
+sacred
 numpy
 plotly
 ipykernel

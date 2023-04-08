@@ -1,4 +1,3 @@
-import torch
 import numpy as np
 import os
 import pandas
@@ -7,7 +6,7 @@ import pandas
 def log_score(log_dir: str, minimum_decay: float = 0.01):
     path = os.path.join(log_dir, "progress.csv")
     if not os.path.exists(path):
-        raise FileNotFoundError("Progress.csv not fould in {}".format(path))
+        raise FileNotFoundError("progress.csv not fould in {}".format(path))
     dataframe = pandas.read_csv(path)
     ep_rewards = dataframe["rollout/ep_rew_mean"].to_numpy()
 

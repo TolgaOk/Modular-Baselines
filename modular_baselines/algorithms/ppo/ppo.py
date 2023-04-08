@@ -1,19 +1,14 @@
-from typing import Tuple, Union, Dict, Generator, Optional, Any, List, Protocol
-from abc import abstractmethod
-import os
+from typing import Tuple, Union, Dict, Generator, List, Protocol
 from time import time
-import torch
-from gym import spaces
-import numpy as np
 from dataclasses import dataclass
-from gym.spaces import Discrete, Space
-
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+import numpy as np
+from gymnasium.vector import VectorEnv
+import torch
 
 from modular_baselines.collectors.collector import RolloutCollector
 from modular_baselines.buffers.buffer import Buffer
 from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.utils.annealings import Coefficient, LinearAnnealing
+from modular_baselines.utils.annealings import Coefficient
 from modular_baselines.algorithms.advantages import calculate_gae
 from modular_baselines.loggers.logger import MBLogger, LogGroup
 from modular_baselines.loggers.writers import StdWriter, JsonWriter
@@ -264,7 +259,7 @@ class PPO():
         return logger
 
     @ staticmethod
-    def setup(env: VecEnv,
+    def setup(env: VectorEnv,
               agent: BaseAgent,
               mb_logger: MBLogger,
               args: PPOArgs,
@@ -277,6 +272,7 @@ class PPO():
             ("action", action_space.dtype, (action_dim,)),
             ("reward", np.float32, (1,)),
             ("termination", np.float32, (1,)),
+            ("truncation", np.float32, (1,)),
             ("old_log_prob", np.float32, (1,)),
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, mb_logger)
