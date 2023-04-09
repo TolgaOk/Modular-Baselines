@@ -12,7 +12,7 @@ def prepare_progress_data(file_names: List[str]) -> List[Dict[str, Any]]:
     return progress_dicts
 
 
-def vega_single_seed_experiment(progress_dicts, x_key="time/steps"):
+def vega_single_seed_experiment(progress_dicts, title: str = "Training Statistics", x_key: str = "time/steps") -> Dict[str, Any]:
     names = list(progress_dicts[0].keys())
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -24,13 +24,11 @@ def vega_single_seed_experiment(progress_dicts, x_key="time/steps"):
             {
                 "name": "selected_legend",
                 "value": "collector/env_reward_mean",
-                #  "select": {"type": "point", "fields": ["legend_name"]},
                 "bind": {"input": "select", "options": names, "name": "Choose y axis:  "}
-                #  "bind": "legend"
             },
         ],
         "title": {
-            "text": "Training Statistics",
+            "text": title,
             "fontSize": 20,
             "fontWeight": 300,
         },
@@ -48,7 +46,7 @@ def vega_single_seed_experiment(progress_dicts, x_key="time/steps"):
                       "title": x_key,
                   }
                   },
-            "color": {"field": "seed", "type": "nominal"},
+            "color": {"field": "legend_name", "type": "nominal"},
             "opacity": {
                 "condition": {"param": "selected_legend", "value": 1.0},
                 "value": 0.0
@@ -79,7 +77,7 @@ def vega_single_seed_experiment(progress_dicts, x_key="time/steps"):
     }
 
 
-def vega_multi_seed_experiment(progress_dicts, x_key="time/steps"):
+def vega_multi_seed_experiment(progress_dicts, title: str = "Training Statistics", x_key: str = "time/steps") -> Dict[str, Any]:
     names = list(progress_dicts[0].keys())
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -95,7 +93,7 @@ def vega_multi_seed_experiment(progress_dicts, x_key="time/steps"):
             },
         ],
         "title": {
-            "text": "Training Statistics",
+            "text": title,
             "fontSize": 20,
             "fontWeight": 300,
         },
