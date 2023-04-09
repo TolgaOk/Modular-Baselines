@@ -2,7 +2,9 @@
 
 > Under Development (In the current version there is no JAX algorithms and network)
 
-Modular-Baselines is a Reinforcement Learning (RL) library with the objective of providing composable, easy-to-use, general set of components for RL research. These components are framework agnostic in the sense that they do not rely on a specific framework (PyTorch, Tensorflow, Jax). That said, Modular baselines includes both Pytorch and JAX implementations of some of the algorithms. The algorithms are implemented within a single script for readability using the components provided in Modular-Baselines. We extensively use duck-typing instead of inheritance to loose the dependency between components and algorithms. 
+Welcome to Modular-Baselines, a library designed for Reinforcement Learning (RL) research. Our goal is to provide a flexible, easy-to-use set of components that can be combined in various ways to enable experimentation with different RL algorithms. Our components are designed to be framework-agnostic, meaning they don't rely on a specific framework like PyTorch, TensorFlow, or Jax. However, we do include both PyTorch and Jax implementations of some of the algorithms.
+
+To keep the codebase easy to read and maintain, we've implemented each algorithm within a single script using the components provided in Modular-Baselines. Our approach emphasizes duck-typing instead of inheritance, which helps us minimize the dependency between components and algorithms.
 
 | Algorithm |  <img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px alt="logo"></img> | <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img> |
 |:-----:|:---------:|:---------:|
@@ -13,7 +15,7 @@ Modular-Baselines is a Reinforcement Learning (RL) library with the objective of
 The algorithms in Modular-Baselines are built using the following components:
 
 
-| Collector |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  |
+| Collectors |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  |
 |:-----:|:---------:|
 |  Rollout  |:heavy_check_mark:|
 |  Episode  |:x:|
@@ -36,11 +38,13 @@ The algorithms in Modular-Baselines are built using the following components:
 - - -
 ## Logging
 
-Modular baselines implements a flexible logging mechanism. This includes a set of data loggers, nested log grouping, writers, and MB logger that combines everything. 
+Modular-Baselines implements a versatile logging mechanism that includes several features such as data loggers, nested log grouping, writers, and the MB logger that combines everything. With our logging system, you can easily track and monitor your experiments, and record data at different levels of granularity.
+
+Our logging mechanism is designed to be flexible, so you can customize it to suit your needs. For example, you can choose from a variety of data loggers depending on the type of log item that you want to track, and group your logs in different ways to propagate them to the right writers. Writers can dump the reduced log data to different targets (e.g., CSV, JSON, TensorBoard). Finally, ```MBLogger``` provides a convenient way to access all the logging functionality in one place.
 
 <img src="./docs/loggers.svg">
 
-The above logger mechanism explicitly shows the relation between log items and the writers. For example; the ```eps_reward``` log item is a ```QueueDataLog``` which contains the last ```n``` values and its ```mean``` is propagated to the writers in the ```progress``` log group. Hence, readers of the code can easily observe how the reported log records are obtained without diving deep into the source code.
+The above logger diagram explicitly shows the relation between the log items and the writers. For example; the ```eps_reward``` log item is a ```QueueDataLog``` which contains the last ```n``` values and its ```mean``` is propagated to the writers in the ```progress``` log group. Hence, readers of the code can easily observe how the reported log records are obtained without diving deep into the source code.
 
 - - -
 ## Installation
