@@ -1,40 +1,44 @@
 # Modular-Baselines
 
-> Under Development (In the current version there is no JAX algorithms and network)
+> :warning: Under Development (In the current version there is no JAX algorithms and network)
 
-Welcome to Modular-Baselines, a library designed for Reinforcement Learning (RL) research. Our goal is to provide a flexible, easy-to-use set of components that can be combined in various ways to enable experimentation with different RL algorithms. Our components are designed to be framework-agnostic, meaning they don't rely on a specific framework like PyTorch, TensorFlow, or Jax. However, we do include both PyTorch and Jax implementations of some of the algorithms.
+Modular-Baselines is a library designed for Reinforcement Learning (RL) research. Our goal is to provide a flexible, easy-to-use set of components that can be combined in various ways to enable experimentation with different RL algorithms. Our components are designed to be framework-agnostic, meaning they don't rely on a specific framework like PyTorch, TensorFlow, or Jax. However, we do include both PyTorch and Jax implementations of some of the algorithms.
 
 To keep the codebase easy to read and maintain, we've implemented each algorithm within a single script using the components provided in Modular-Baselines. Our approach emphasizes duck-typing instead of inheritance, which helps us minimize the dependency between components and algorithms.
+
+### **Implemented Algorithms**
 
 | Algorithm |  <img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px alt="logo"></img> | <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img> |
 |:-----:|:---------:|:---------:|
 |  A2C  |:x:|:heavy_check_mark:|
 |  PPO  |:x:|:heavy_check_mark:|
+|  Recurrent PPO  |:x:|:heavy_check_mark:|
+|  SAC  |:x:|:x:|
+|  TD3  |:x:|:x:|
+|  RAINBOW  |:x:|:x:|
+|  MPO  |:x:|:x:|
+|  CQL  |:x:|:x:|
 
 ### **Components**
 The algorithms in Modular-Baselines are built using the following components:
 
 
-| Collectors |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  |
-|:-----:|:---------:|
-|  Rollout  |:heavy_check_mark:|
-|  Episode  |:x:|
-|  Model  |:x:|
-|  MCTS  |:x:|
-
-| Buffers |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  |
-|:-----:|:---------:|
-|  Uniform  |:heavy_check_mark:|
-|  Prioritized  |:x:|
-
-| Traces |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  | <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img> |
-|:-----:|:---------:|:---------:|
-|  GAE  |:heavy_check_mark:|:x:|
-|  Retrace  |:x:|:x:|
-|  Vtrace  |:x:|:x:|
-
-
-
+|| Components |  <img src="https://raw.githubusercontent.com/numpy/numpy/main/branding/logo/logomark/numpylogoicon.svg" width = 64px alt="logo"></img>  | <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img> | <img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px alt="logo"></img>|
+|:-----:|:-----:|:---------:|:---------:|:---------:|
+|**Traces**|  GAE  |:heavy_check_mark:|:x:|:x:|
+||  Retrace  |:x:|:x:|:x:|
+||  Vtrace  |:x:|:x:|:x:|
+|**Buffers**|  Uniform  |:heavy_check_mark:|:heavy_minus_sign:|:heavy_minus_sign:|
+||  Prioritized  |:x:|:heavy_minus_sign:|:heavy_minus_sign:|
+|  **Collectors** |Rollout| :heavy_check_mark:|:heavy_minus_sign:|:heavy_minus_sign:|
+||  Episode  |:x:|:heavy_minus_sign:|:heavy_minus_sign:|
+||  Asynchronous  |:x:|:heavy_minus_sign:|:heavy_minus_sign:|
+||  Model-Based  |:heavy_minus_sign:|:x:|:x:|
+||  MCTS  |:heavy_minus_sign:|:x:|:x:|
+|  **Networks** |Shared MLP| :heavy_minus_sign:|:heavy_check_mark:|:x:|
+||Separate MLP| :heavy_minus_sign:|:heavy_check_mark:|:x:|
+||Atari Encoder| :heavy_minus_sign:|:x:|:x:|
+|  **Misc** |Distributional Bellman Loss| :heavy_minus_sign:|:x:|:x:|
 - - -
 ## Logging
 
@@ -58,22 +62,34 @@ We recommend that you install ```pytorch``` and ```mujoco``` separately before i
 
 Install the requirement packages by running
 
-```
-conda install -c conda-forge swig
-conda install nodejs
+```bash
+conda install -c conda-forge swig # Requirement of box-2d
 pip install -r requirements.txt
 ```
 
 Install the project in development mode
 
-```
+```bash
 pip install -e .
 ```
+- - -
+## Experiments
+
+We understand that reproducibility is a critical aspect of RL research. To help ensure that your experiments are easily reproducible and never lost, we've integrated the [Sacred](https://github.com/IDSIA/sacred) into Modular-Baselines. Sacred is a Python package designed to handle experimentation in Machine Learning research, and it tracks various aspects of your experiments, such as
+- Dependencies
+- Source Codes
+- Files produced by the experiment
+- Configuration
+- Git head commit hash
+
+and more.
+
+Modular-Baselines includes several example scripts in the ```examples``` directory. These scripts are used to obtain results within several environments and to validate the implementations. They also serve as a example for your own experiments.
 
 - - -
 ## Vega Visualizations
 
-Modular-Baselines provides vega-lite Json templates for rendering interactive plots for visualizing the logger outputs. The log files of a run can be visualized in Jupyter Notebook via the provided functions in ```visualizers``` folder.
+Modular-Baselines provides vega-lite Json templates for rendering interactive plots for visualizing the logger outputs. The log files created by the provided JSON writer of a run can be visualized in Jupyter Notebook via the provided functions in ```visualizers/vega.py``` module.
 
 <p float="left">
   <img src="docs/single-seed.svg" width="45%" />
