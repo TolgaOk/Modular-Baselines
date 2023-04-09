@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import Tuple, Union, Dict, Generator, Any, List
 from abc import abstractmethod
 import numpy as np

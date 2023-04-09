@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import List, Optional, Union, Dict, Tuple, Any
 from gym import spaces
 import numpy as np

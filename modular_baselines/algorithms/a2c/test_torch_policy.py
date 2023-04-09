@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from logging import log
 import unittest
 import numpy as np
