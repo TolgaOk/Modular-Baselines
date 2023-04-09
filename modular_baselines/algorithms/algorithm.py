@@ -1,3 +1,5 @@
+raise DeprecationWarning()
+
 from abc import ABC, abstractmethod
 from typing import List, Optional, Union
 from time import time

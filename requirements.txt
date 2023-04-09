@@ -1,6 +1,7 @@
-stable_baselines3
-gym[atari, box2d, accept-rom-license, mujoco] >= 0.23
-numpy >= 1.21.5
+gymnasium[atari, box2d, accept-rom-license, mujoco] == 0.28.1
+torch == 2.0.0
+numpy >= 1.24.2
+sacred
 plotly
 ipykernel
 pandas
@@ -8,3 +9,4 @@ ipywidgets
 psutil
 pandas
 cloudpickle
+loguru

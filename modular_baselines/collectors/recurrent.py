@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 from typing import List, Optional, Union, Dict, Any, Tuple
 import numpy as np
 
