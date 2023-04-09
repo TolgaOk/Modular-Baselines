@@ -5,3 +5,4 @@
 logs/
 *.prof
 *.ipynb
+*/sacred_files/*

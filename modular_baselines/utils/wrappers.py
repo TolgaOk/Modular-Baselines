@@ -1,3 +1,4 @@
+raise DeprecationWarning()
 import numpy as np
 
 from gym.spaces import (Box,

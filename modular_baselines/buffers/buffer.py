@@ -4,29 +4,10 @@ import psutil
 import warnings
 from abc import ABC, abstractmethod
 
-from modular_baselines.loggers.data_logger import DataLogger
-from modular_baselines.component import Component
+from modular_baselines.loggers.logger import MBLogger
 
 
-class BaseBufferCallback(ABC):
-    """ Base class for buffer callbacks that only supports:
-        on_buffer_push, on_buffer_sample, and on_buffer_init calls.
-    """
-
-    @abstractmethod
-    def on_buffer_push(self) -> None:
-        pass
-
-    @abstractmethod
-    def on_buffer_sample(self) -> None:
-        pass
-
-    @abstractmethod
-    def on_buffer_init(self) -> None:
-        pass
-
-
-class BaseBuffer(Component):
+class BaseBuffer(ABC):
 
     @abstractmethod
     def push(self):
@@ -47,24 +28,19 @@ class Buffer(BaseBuffer):
             struct (np.dtype): Array dtype of a single item
             capacity (int): Maximum size of the buffer
             num_envs (int): Number of parallel environments
-            callbacks (Optional[Union[List[BaseBufferCallback], BaseBufferCallback]]): Callbacks
+            logger (MBLogger): Data logger
     """
 
     def __init__(self,
                  struct: np.dtype,
                  capacity: int,
                  num_envs: int,
-                 logger: DataLogger,
-                 callbacks: Optional[Union[List[BaseBufferCallback], BaseBufferCallback]] = None
+                 logger: MBLogger,
                  ) -> None:
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
-        super().__init__(logger)
-
-        if not isinstance(callbacks, (list, tuple)):
-            callbacks = [callbacks] if callbacks is not None else []
-        self.callbacks = callbacks
+        self.logger = logger
 
         available_memory = psutil.virtual_memory().available
         required_memory = struct.itemsize * capacity * num_envs
@@ -76,9 +52,6 @@ class Buffer(BaseBuffer):
         self.buffer = np.zeros(shape=(capacity, num_envs), dtype=struct)
         self._write_index = 0
         self.full = False
-
-        for callback in self.callbacks:
-            callback.on_initialization(locals())
 
     @property
     def size(self) -> int:
@@ -99,9 +72,6 @@ class Buffer(BaseBuffer):
                 "Invalid shape for {}, expected shape: {}, given shape: {}").format(
                     name, expected_shape, array.shape)
             self.buffer[self._write_index][name] = array
-
-        for callback in self.callbacks:
-            callback.on_push(locals())
 
         self._write_index = (self._write_index + 1) % self.capacity
         self.full = self.full or self._write_index == 0
@@ -138,9 +108,6 @@ class Buffer(BaseBuffer):
 
         sample = self.buffer[time_indices, env_indices]
 
-        for callback in self.callbacks:
-            callback.on_sample(locals())
-
         return self.postprocess_sample(sample)
 
     def postprocess_sample(self, sample: np.ndarray) -> np.ndarray:
@@ -153,6 +120,3 @@ class Buffer(BaseBuffer):
             np.ndarray: Transformed sample of the buffer dtype
         """
         return sample
-
-    def _init_default_loggers(self) -> None:
-        pass

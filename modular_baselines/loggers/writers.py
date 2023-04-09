@@ -1,132 +1,70 @@
-from typing import Any, Callable, Dict, List, Optional, Union, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Type, Union, Protocol
 import time
 from collections import deque
 import numpy as np
 import pickle
+import sys
+from loguru import logger
 import os
 import json
 import dataclasses
 
-from stable_baselines3.common.logger import Logger, CSVOutputFormat, HumanOutputFormat, JSONOutputFormat
-from stable_baselines3.common.vec_env.base_vec_env import VecEnvWrapper
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
-
-from modular_baselines.algorithms.algorithm import BaseAlgorithmCallback
-from modular_baselines.collectors.collector import BaseCollectorCallback
+from modular_baselines.loggers.datalog import BaseDataLog as DataLog
 
 
-class BaseWriter(BaseAlgorithmCallback):
+class StdWriter():
 
-    prefix: str
+    StdoutValueType: Type = Union[str, int, float]
+    config: Dict[str, Any] = {
+        "handlers": [
+            {"sink": sys.stdout, "colorize": True,
+             "format": "<level>{message}</level>"},
+        ],
+        "extra": {}
+    }
 
-    def on_training_start(self, *args) -> None:
-        pass
+    def __init__(self) -> None:
+        logger.configure(**self.config)
+        logger.level("DATA", no=38, color="<e>")
+        logger.level("TITLE", no=36, color="<g>")
 
-    def on_training_end(self, *args) -> None:
-        pass
+    def write(self, name: Optional[str], log_dump: Dict[str, Any]) -> None:
+        name = name if name is not None else "- "
+        logger.log("TITLE", f"- " * 8 + f"{name}" + " -" * 8)
 
+        def _write(name: Optional[str], log_dump: Dict[str, Any], prefix: str) -> None:
+            for log_name, log_value in log_dump.items():
+                if isinstance(log_value, dict):
+                    logger.log("TITLE", prefix + log_name)
+                    _write(log_name, log_value, prefix + "   ")
+                else:
+                    logger.log("DATA",  f"{prefix}{log_name}: {log_value}")
 
-class ScalarWriter(BaseWriter):
-
-    prefix: str = "scalar"
-
-    def __init__(self,
-                 interval: int,
-                 dir_path: str,
-                 writers: List[Union[CSVOutputFormat, HumanOutputFormat, JSONOutputFormat]]
-                 ) -> None:
-        super().__init__()
-        self.interval = interval
-        self.sb3_logger = Logger(dir_path, writers)
-
-    def on_step(self, locals_: Dict[str, Any]) -> bool:
-        if locals_["iteration"] % self.interval == 0:
-            logger = locals_["self"].logger
-            for name, data_log in logger.__dict__.items():
-                name_pieces = name.split("/")
-                name = "/".join(name_pieces[1:])
-                if name_pieces[0] == self.prefix:
-                    self.sb3_logger.record(name, data_log.dump())
-            self.sb3_logger.dump()
-
-    def write_historgram(self, histgoram_data: Dict[str, Dict[str, List[Union[float, int]]]]) -> None:
-        with open(self.path, "a") as jsonfile:
-            jsonstr = json.dumps(histgoram_data)
-            jsonfile.write(jsonstr + "\n")
+        _write(None, log_dump, "")
 
 
-class DictWriter(BaseWriter):
+class JsonWriter():
 
-    prefix: str = "dict"
+    def __init__(self, dirpath: str) -> None:
+        self.dirpath = dirpath
 
-    def __init__(self,
-                 interval: int,
-                 dir_path: str):
-        super().__init__()
-        self.interval = interval
-        self.dir = dir_path
+    def write(self, name: Optional[str], log_dump: Dict[str, Any]) -> None:
+        name = name if name is not None else "default"
+        filepath = os.path.join(self.dirpath, f"{name}.json")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "a") as file_obj:
+            json.dump(self._flatten_dict(log_dump), file_obj)
+            file_obj.write("\n")
 
-    def on_training_start(self, locals_) -> None:
-        logger = locals_["self"].logger
-        for name, _ in logger.__dict__.items():
-            name_pieces = name.split("/")
-            if name_pieces[0] == self.prefix:
-                dir_path = os.path.join(self.dir, "/".join(name_pieces[1:-1]))
-                os.makedirs(dir_path, exist_ok=True)
-                path = os.path.join(dir_path, name_pieces[-1] + ".json")
-                if os.path.exists(path):
-                    raise FileExistsError(
-                        "File at {} already exists".format(path))
-
-    def on_step(self, locals_: Dict[str, Any]) -> bool:
-        iteration = locals_["iteration"]
-        if iteration % self.interval == 0:
-            logger = locals_["self"].logger
-
-            for name, data_log in logger.__dict__.items():
-                name_pieces = name.split("/")
-                name = "/".join(name_pieces[1:])
-                if name_pieces[0] == self.prefix:
-                    data = data_log.dump()
-                    path = os.path.join(self.dir, name + ".json")
-                    with open(path, "a") as json_file:
-                        json_str = json.dumps(dict(data))
-                        json_file.write(json_str + "\n")
-
-
-class SaveModelParametersWriter(BaseWriter):
-
-    prefix: str = "network"
-
-    def __init__(self,
-                 interval: int,
-                 dir_path: str):
-        super().__init__()
-        self.interval = interval
-        self.dir = os.path.join(dir_path, self.prefix)
-        os.makedirs(self.dir, exist_ok=True)
-
-    def on_step(self, locals_: Dict[str, Any]) -> bool:
-
-        iteration = locals_["iteration"]
-        if iteration % self.interval == 0:
-            agent = locals_["self"].agent
-            vecenv = locals_["self"].collector.env
-            agent.save(os.path.join(self.dir, f"params_{iteration}.b"))
-            if self.is_vec_env(vecenv):
-                with open(os.path.join(self.dir, f"env_norm_{iteration}.b"), "wb") as fobj:
-                    pickle.dump(vecenv.__getstate__(), fobj)
-
-    def is_vec_env(self, vecenv: Union[VecEnv, VecEnvWrapper]) -> bool:
-        is_vec_normalize = False
-        while isinstance(vecenv, VecEnvWrapper):
-            if isinstance(vecenv, VecNormalize):
-                is_vec_normalize = True
-                break
-            vecenv = vecenv.venv
-        return is_vec_normalize
-        
+    def _flatten_dict(self, nested_logs: Dict[str, Any], prefix: str = None):
+        items = {}
+        for key, value in nested_logs.items():
+            name = "/".join([prefix, key]) if prefix is not None else key
+            if isinstance(value, dict):
+                items = {**items, **self._flatten_dict(value, prefix=name)}
+            else:
+                items[name] = value
+        return items
 
 
 class LogConfigs():

@@ -1,37 +1,14 @@
-
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any, Tuple, Protocol
 import numpy as np
-from gym.spaces import Discrete, Box
 from abc import ABC, abstractmethod
+from gymnasium.spaces import Discrete, Box
+from gymnasium.vector import VectorEnv
 
-from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
-
-from modular_baselines.component import Component
 from modular_baselines.buffers.buffer import BaseBuffer
-from modular_baselines.algorithms.agent import BaseAgent
-from modular_baselines.loggers.data_logger import DataLogger, ListDataLog, HistListDataLog
+from modular_baselines.loggers.datalog import ListDataLog, HistogramDataLog
 
 
-class BaseCollectorCallback(ABC):
-    """ Base class for buffer callbacks that only supports:
-    on_rollout_start, on_rollout_step, and on_rollout_end calls.
-    """
-
-    @abstractmethod
-    def on_rollout_start(self, *args) -> None:
-        pass
-
-    @abstractmethod
-    def on_rollout_step(self, *args) -> None:
-        pass
-
-    @abstractmethod
-    def on_rollout_end(self, *args) -> None:
-        pass
-
-
-class BaseCollector(Component):
+class BaseCollector(ABC):
     """ Base abstract class for collectors """
 
     @abstractmethod
@@ -39,52 +16,48 @@ class BaseCollector(Component):
         pass
 
 
+class Agent(Protocol):
+    def sample_action(self, observation: np.ndarray
+                      ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]: ...
+
+
+class RolloutLogger(Protocol):
+    env_reward: ListDataLog
+    env_length: ListDataLog
+    actions: HistogramDataLog
+
+
 class RolloutCollector(BaseCollector):
     """ Collects a rollout with every collect call and add the experience into the buffer.
 
     Args:
-        env (VecEnv): Vectorized environment
+        env (VectorEnv): Vectorized environment
         buffer (BaseBuffer): Buffer to push rollout experiences
-        agent (BaseAgent): Action sampling agent
-        logger (DataLogger): Data logger to log environment reward and lengths at termination
-        callbacks (Optional[Union[List[BaseCollectorCallback], BaseCollectorCallback]], optional): Collector Callback. Defaults to [] (no callbacks).
+        agent (Agent): Action sampling agent
+        logger (RolloutLogger): Data logger to log environment reward and lengths at termination
     """
 
     _required_buffer_fields = ("observation", "next_observation", "reward",
-                               "termination", "action")
+                               "termination", "truncation", "action")
 
     def __init__(self,
-                 env: VecEnv,
+                 env: VectorEnv,
                  buffer: BaseBuffer,
-                 agent: BaseAgent,
-                 logger: DataLogger,
-                 store_normalizer_stats: bool = False,
-                 callbacks: Optional[Union[List[BaseCollectorCallback],
-                                           BaseCollectorCallback]] = None):
+                 agent: Agent,
+                 logger: RolloutLogger,
+                 store_normalizer_stats: bool = False):
         self.env = env
         self.buffer = buffer
         self.agent = agent
         self.store_normalizer_stats = store_normalizer_stats
-        super().__init__(logger)
+        self.logger = logger
 
         for field in self._required_buffer_fields:
             assert field in buffer.struct.names, (
                 "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
-        self._last_obs = self.env.reset()
-
-        if not isinstance(callbacks, (list, tuple)):
-            callbacks = [callbacks] if callbacks is not None else []
-        self.callbacks = callbacks
-
-    def _init_default_loggers(self) -> None:
-        loggers = {
-            "scalar/collector/env_reward": ListDataLog(reduce_fn=lambda values: np.mean(values)),
-            "scalar/collector/env_length": ListDataLog(reduce_fn=lambda values: np.mean(values)),
-            "dict/histogram/actions": HistListDataLog(n_bins=10, reduce_fn=lambda values: {"action": np.stack(values)}),
-        }
-        self.logger.add_if_not_exists(loggers)
+        self._last_obs, _ = self.env.reset()
 
     def collect(self, n_rollout_steps: int) -> int:
         """ Collect a rollout of experience using the agent and load them to
@@ -98,60 +71,52 @@ class RolloutCollector(BaseCollector):
         """
 
         n_steps = 0
-        for callback in self.callbacks:
-            callback.on_rollout_start(locals())
-
         while n_steps < n_rollout_steps:
 
             actions, policy_content = self.get_actions()
             normalizer_stats = {}
             if self.store_normalizer_stats:
-                normalizer_stats["obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_mean"] = np.expand_dims(
+                    self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["obs_rms_var"] = np.expand_dims(
+                    self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
-            new_obs, rewards, dones, infos = self.environment_step(actions)
-            next_obs = new_obs
-            # Terminated new_obs is different than the given next_obs
-            terminated_indexes = np.argwhere(dones.flatten() == 1).flatten()
-            if len(terminated_indexes) > 0:
-                next_obs = new_obs.copy()
-                for index in terminated_indexes:
-                    next_obs[index] = infos[index]["terminal_observation"]
+            new_obs, rewards, termination, truncation, infos = self.environment_step(actions)
+            dones = np.logical_or(termination, truncation)
+            next_obs = new_obs.copy() if dones.any() else new_obs
+            for index in np.argwhere(dones.flatten()).flatten():
+                next_obs[index] = infos["final_observation"][index]
 
             self.num_timesteps += self.env.num_envs
             n_steps += 1
 
             if self.store_normalizer_stats:
-                normalizer_stats["reward_rms_var"] = self.env.ret_rms.var.reshape(1, -1).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["next_obs_rms_mean"] = np.expand_dims(self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
-                normalizer_stats["next_obs_rms_var"] = np.expand_dims(self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["return_rms_var"] = self.env.return_rms.var.reshape(
+                    1, -1).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_mean"] = np.expand_dims(
+                    self.env.obs_rms.mean, axis=0).repeat(self.env.num_envs, axis=0)
+                normalizer_stats["next_obs_rms_var"] = np.expand_dims(
+                    self.env.obs_rms.var, axis=0).repeat(self.env.num_envs, axis=0)
 
             self.buffer.push({
                 "observation": self._last_obs,
                 "next_observation": next_obs,
                 "reward": rewards,
-                "termination": dones,
+                "termination": termination,
+                "truncation": truncation,
                 "action": actions,
                 **policy_content,
                 **normalizer_stats,
             })
 
             # Log environment info
-            for idx, info in enumerate(infos):
-                maybe_ep_info = info.get("episode")
-                if maybe_ep_info is not None:
-                    getattr(self.logger, "scalar/collector/env_reward").push(maybe_ep_info["r"])
-                    getattr(self.logger, "scalar/collector/env_length").push(maybe_ep_info["l"])
+            if dones.any():
+                for index in np.argwhere(dones.flatten()).flatten():
+                    self.logger.env_reward.push(infos["episode"]["r"][index].item())                 
+                    self.logger.env_length.push(infos["episode"]["l"][index].item())                 
             # Logging actions for histogram
-            getattr(self.logger, "dict/histogram/actions").push(actions)
-
+            self.logger.actions.push(actions)
             self._last_obs = new_obs
-
-            for callback in self.callbacks:
-                callback.on_rollout_step(locals())
-
-        for callback in self.callbacks:
-            callback.on_rollout_end(locals())
 
         return self.num_timesteps
 
@@ -163,7 +128,7 @@ class RolloutCollector(BaseCollector):
             actions = actions.reshape(-1)
         if isinstance(self.env.action_space, Box):
             actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-        observation, rewards, dones, infos = self.env.step(actions)
-        rewards = rewards.reshape(-1, 1)
-        dones = dones.reshape(-1, 1)
-        return observation, rewards, dones, infos
+        observation, rewards, termination, truncation, infos = self.env.step(actions)
+        return (observation,
+                *(array.reshape(-1, 1) for array in (rewards, termination, truncation)),
+                infos)
