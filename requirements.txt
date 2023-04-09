@@ -1,7 +1,7 @@
 gymnasium[atari, box2d, accept-rom-license, mujoco] == 0.28.1
 torch == 2.0.0
+numpy >= 1.24.2
 sacred
-numpy
 plotly
 ipykernel
 pandas
