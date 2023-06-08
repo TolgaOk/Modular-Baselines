@@ -1,14 +1,17 @@
 from typing import Any, Dict
+import jax
+import optax
+import jax.numpy as jnp
 import gymnasium as gym
 from gymnasium.wrappers import NormalizeObservation, NormalizeReward, RecordEpisodeStatistics
 from sacred import SETTINGS
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
 
-from modular_baselines.algorithms.ppo.ppo import PPO, PPOArgs
+from modular_baselines.algorithms.ppo.ppo_jx import PPO, PPOArgs
 from modular_baselines.utils.annealings import LinearAnnealing
-from modular_baselines.algorithms.agent import TorchAgent
-from modular_baselines.networks.network import SeparateFeatureNetwork
+from modular_baselines.algorithms.jax_agent import JaxAgent
+from modular_baselines.networks.network_jax import SeparateFeatureNetwork, TrainState
 from modular_baselines.utils.experiment import record_log_files
 
 SETTINGS["DISCOVER_DEPENDENCIES"] = "sys"
@@ -51,9 +54,11 @@ def default_configs():
 
 
 @ex.automain
-def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str, seed: int):
-    # Seeding is not implemented yet
-
+def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
+    rng_seed = ppo_args.seed    
+    rng = jax.random.PRNGKey(rng_seed)
+    _, _rng = jax.random.split(rng)
+    
     logger = PPO.initialize_loggers(log_dir)
     env = gym.vector.make(env_args["env_name"], num_envs=env_args["num_envs"])
     env = RecordEpisodeStatistics(env)
@@ -62,20 +67,35 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str, seed: int):
     if env_args["use_norm_rew"]:
         vecenv = NormalizeReward(env, gamma=ppo_args.gamma)
 
-    network = SeparateFeatureNetwork(
+    network_def = SeparateFeatureNetwork(in_size=vecenv.single_observation_space.shape[0],
+        out_size=vecenv.single_action_space.shape[0],
+        policy_hidden_size=64,
+        value_hidden_size=64,
         observation_space=vecenv.single_observation_space,
         action_space=vecenv.single_action_space)
-    agent = TorchAgent(
+    
+    inputs = [_rng, jnp.zeros(vecenv.single_observation_space.shape[0])]
+    network_params = network_def.init(*inputs)
+    tx = optax.chain(optax.clip_by_global_norm(ppo_args.max_grad_norm), optax.adam(learning_rate=1e-4))
+
+    network = TrainState.create(apply_fn=network_def.apply,
+                                params=network_params['params'],
+                                tx=tx)
+
+    agent = JaxAgent(
         network=network,
         observation_space=vecenv.single_observation_space,
         action_space=vecenv.single_action_space,
-        logger=logger
+        logger=logger,
+        rng_seed=rng_seed
     )
     agent = PPO.setup(
         env=vecenv,
         agent=agent,
         mb_logger=logger,
-        args=ppo_args)
+        args=ppo_args,
+        rng_seed=rng_seed)
+    
 
-    agent.learn()
+    train_jit = jax.jit(agent.learn())
     record_log_files(ex, log_dir)
