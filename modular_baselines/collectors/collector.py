@@ -45,19 +45,21 @@ class RolloutCollector(BaseCollector):
                  buffer: BaseBuffer,
                  agent: Agent,
                  logger: RolloutLogger,
+                 rng_seed: Optional[int] = None,
                  store_normalizer_stats: bool = False):
         self.env = env
         self.buffer = buffer
         self.agent = agent
         self.store_normalizer_stats = store_normalizer_stats
         self.logger = logger
+        self.rng = np.random.default_rng(rng_seed)
 
         for field in self._required_buffer_fields:
             assert field in buffer.struct.names, (
                 "Buffer does not contain the field name {}".format(field))
 
         self.num_timesteps = 0
-        self._last_obs, _ = self.env.reset()
+        self._last_obs, _ = self.env.reset(seed=[item.item() for item in self.rng.integers(0, 2**30, env.num_envs)])
 
     def collect(self, n_rollout_steps: int) -> int:
         """ Collect a rollout of experience using the agent and load them to

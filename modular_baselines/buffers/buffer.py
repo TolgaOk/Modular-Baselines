@@ -36,11 +36,13 @@ class Buffer(BaseBuffer):
                  capacity: int,
                  num_envs: int,
                  logger: MBLogger,
+                 rng_seed: Optional[int] = None,
                  ) -> None:
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
         self.logger = logger
+        self.rng_seed = np.random.default_rng(rng_seed)
 
         available_memory = psutil.virtual_memory().available
         required_memory = struct.itemsize * capacity * num_envs
@@ -100,7 +102,7 @@ class Buffer(BaseBuffer):
         sampling_length = min(sampling_length, buffer_size) - rollout_len
         high = self._write_index - rollout_len
         low = high - sampling_length
-        time_indices = np.random.randint(low=low, high=high + 1, size=batch_size) % buffer_size
+        time_indices = self.rng.integer(low=low, high=high + 1, size=batch_size) % buffer_size
 
         time_indices = (time_indices.reshape(-1, 1) +
                         np.arange(rollout_len).reshape(1, -1)) % buffer_size

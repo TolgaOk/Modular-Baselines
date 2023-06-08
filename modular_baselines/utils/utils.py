@@ -1,5 +1,6 @@
 from typing import Optional, Any, Dict, Tuple, Union, List, Callable
 import torch
+import jax.numpy as jnp
 import numpy as np
 from gymnasium.spaces import Box, Discrete
 from gymnasium.vector import VectorEnv
@@ -23,9 +24,14 @@ def to_torch(device: str, ndarray: np.ndarray):
         return torch.from_numpy(ndarray).to(device)
     return _to_torch(ndarray)
 
+def to_jax(ndarray: jnp.ndarray):
+    @nested
+    def _to_jax(ndarray):
+        return jnp.array(ndarray, dtype=float)
+    return _to_jax(ndarray)
 
 @nested
-def flatten_time(tensor: torch.Tensor) -> torch.Tensor:
+def flatten_time(tensor: Union[torch.Tensor, jnp.ndarray]) -> Union[torch.Tensor, jnp.ndarray]:
     n_envs, n_rollout = tensor.shape[:2]
     return tensor.reshape(n_envs * n_rollout, *tensor.shape[2:])
 
