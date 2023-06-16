@@ -3,10 +3,12 @@ import jax
 import optax
 import jax.numpy as jnp
 import gymnasium as gym
+from gymnasium.spaces import Box
 from gymnasium.wrappers import NormalizeObservation, NormalizeReward, RecordEpisodeStatistics
 from sacred import SETTINGS
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
+
 
 from modular_baselines.algorithms.ppo.ppo_jx import PPO, PPOArgs
 from modular_baselines.utils.annealings import LinearAnnealing
@@ -66,9 +68,12 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
         env = NormalizeObservation(env)
     if env_args["use_norm_rew"]:
         vecenv = NormalizeReward(env, gamma=ppo_args.gamma)
+    
+    if isinstance(vecenv.single_action_space, Box):
+            out_size = vecenv.single_action_space.shape[0] * 2
 
     network_def = SeparateFeatureNetwork(in_size=vecenv.single_observation_space.shape[0],
-        out_size=vecenv.single_action_space.shape[0],
+        out_size=out_size,
         policy_hidden_size=64,
         value_hidden_size=64,
         observation_space=vecenv.single_observation_space,
