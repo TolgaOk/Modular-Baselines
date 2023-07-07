@@ -72,7 +72,7 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
     if isinstance(vecenv.single_action_space, Box):
             out_size = vecenv.single_action_space.shape[0] * 2
 
-    network_def = SeparateFeatureNetwork(in_size=vecenv.single_observation_space.shape[0],
+    network = SeparateFeatureNetwork(in_size=vecenv.single_observation_space.shape[0],
         out_size=out_size,
         policy_hidden_size=64,
         value_hidden_size=64,
@@ -80,15 +80,15 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
         action_space=vecenv.single_action_space)
     
     inputs = [_rng, jnp.zeros(vecenv.single_observation_space.shape[0])]
-    network_params = network_def.init(*inputs)
+    network_params = network.init(*inputs)
     tx = optax.chain(optax.clip_by_global_norm(ppo_args.max_grad_norm), optax.adam(learning_rate=1e-4))
 
-    network = TrainState.create(apply_fn=network_def.apply,
+    train_state = TrainState.create(apply_fn=network.apply,
                                 params=network_params['params'],
                                 tx=tx)
 
     agent = JaxAgent(
-        network=network,
+        state=train_state,
         observation_space=vecenv.single_observation_space,
         action_space=vecenv.single_action_space,
         logger=logger,
