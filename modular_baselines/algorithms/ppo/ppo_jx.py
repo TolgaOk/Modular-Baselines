@@ -1,15 +1,16 @@
-from typing import Tuple, Union, Dict, Generator, List, Protocol
+from typing import Tuple, Union, Dict, Generator, List, Protocol, Callable
 from time import time
 from dataclasses import dataclass
 from gymnasium.vector import VectorEnv
 import jax
+import flax
 import optax
 import numpy as np
 import jax.numpy as jnp
 import distrax
 import flax.linen as nn
-from flax.training.train_state import TrainState
 
+from functools import partial
 from modular_baselines.collectors.collector import RolloutCollector
 from modular_baselines.buffers.buffer import Buffer
 from modular_baselines.algorithms.agent import BaseAgent
@@ -44,7 +45,6 @@ class PPOAgent(Protocol):
     network: nn.Module
 
     def device(self) -> str: ...
-    def forward(self, obs: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]: ...
 
     def dist(self, obs: jnp.ndarray) -> Union[
         distrax.Normal,
@@ -90,20 +90,20 @@ class PPO():
         # self.create_network()
         
 
-    def create_network(self):
-        rng, _rng = jax.random.split(self.rng)
+    # def create_network(self):
+    #     rng, _rng = jax.random.split(self.rng)
 
-        inputs = [_rng, self.collector._last_obs]
-        network_params = self.agent.network.init(*inputs)
+    #     inputs = [_rng, self.collector._last_obs]
+    #     network_params = self.agent.network.init(*inputs)
 
-        tx = optax.chain(optax.clip_by_global_norm(self.args.max_grad_norm), optax.adam(learning_rate=1e-4))
+    #     tx = optax.chain(optax.clip_by_global_norm(self.args.max_grad_norm), optax.adam(learning_rate=1e-4))
 
-        self.network = TrainState.create(apply_fn=self.agent.network.apply,
-                                         params=network_params['params'],
-                                         tx=tx,
-                                        )
+    #     self.network = TrainState.create(apply_fn=self.agent.network.apply,
+    #                                      params=network_params['params'],
+    #                                      tx=tx,
+    #                                     )
 
-        self.rng = rng
+    #     self.rng = rng
 
 
     def learn(self) -> None:
@@ -130,14 +130,12 @@ class PPO():
 
         return None
 
-    @jax.jit
     def update(self) -> Dict[str, float]:
         """ One step parameter update. This will be called once per rollout.
 
         Returns:
             Dict[str, float]: Dictionary of losses to log
         """
-        self.agent.network.train(True)
         sample = self.buffer.sample(batch_size=self.num_envs,
                                     rollout_len=self.args.rollout_len,
                                     sampling_length=self.args.rollout_len)
@@ -145,9 +143,10 @@ class PPO():
         clip_value = next(self.args.clip_value)
         lr = next(self.args.lr)
 
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = lr
-
+        # TODO:
+        # for param_group in self.optimizer.param_groups:
+        #     param_group['lr'] = lr
+        state = self.agent.state
         rollout_data = self.prepare_rollout(sample)
 
         for epoch in range(self.args.epochs):
@@ -156,84 +155,88 @@ class PPO():
                 if self.args.normalize_advantage:
                     advantages = (advantages - advantages.mean()
                                   ) / (advantages.std() + 1e-8)
-                    
-                policy_params, values = self.replay_rollout(*replay_data)
-                policy_dist = self.agent.dist(policy_params)
-                log_probs = policy_dist.log_prob(action).unsqueeze(-1)
-                entropies = policy_dist.entropy().unsqueeze(-1)
 
-                def loss_func(self, values, returns, log_probs, old_log_prob, advantages, clip_value,
-                    entropies):
-                    value_loss = optax.mse_loss(values, returns)
-                    ratio = jax.exp(log_probs - jax.lax.stop_gradient(old_log_prob))
-
-                    surrogate_loss_1 = advantages * ratio
-                    surrogate_loss_2 = advantages * \
-                                jax.lax.clamp(1 - clip_value, ratio, 1 + clip_value)
-                    
-                    policy_loss = - \
-                                jnp.mean(jax.lax.min(surrogate_loss_1, surrogate_loss_2))
-                    entropy_loss = jnp.mean(entropies)
-                    loss = value_loss * self.args.value_coef + \
-                                policy_loss + entropy_loss * self.args.ent_coef
-                    
-                    return loss, value_loss, policy_loss, entropy_loss, ratio
-
-                (loss, value_loss, policy_loss, entropy_loss, ratio), grads  = \
-                jax.value_and_grad(loss_func, has_aux=True, argnums=0)(values,
-                                                                            returns,
-                                                                            log_probs,
-                                                                            old_log_prob,
-                                                                            advantages,
-                                                                            clip_value,
-                                                                            entropies)
+                grad_fn = jax.value_and_grad(self.loss_func, has_aux=True)
                 
-                updates, new_opt_state = self.agent.network.tx.update(grads, self.opt_state, self.agent.network.params)
-                new_rewarder_params = optax.apply_updates(self.agent.network.params, updates)
+                data, grads = grad_fn(state.params,
+                                        state.apply_fn,
+                                        replay_data,
+                                        action,
+                                        returns,
+                                        old_log_prob,
+                                        advantages,
+                                        clip_value,
+                                        self.args.value_coef,
+                                        self.args.ent_coef)
 
-                self.agent.network = self.agent.network.replace(step=self.agent.network.step + 1,
-                        params=new_rewarder_params,
-                        opt_state=new_opt_state)
+                loss, (value_loss, policy_loss, entropy_loss, ratio) = data
+
+                state = state.apply_gradients(grads=grads)
 
                 self.logger.value_loss.push(value_loss)
                 self.logger.policy_loss.push(policy_loss)
                 self.logger.entropy_loss.push(entropy_loss)
                 self.logger.approxkl.push(
-                    ((ratio - 1) - ratio.log()).mean().item())
+                    ((ratio - 1) - jnp.log(ratio)).mean().item())
 
         self.logger.clip_range.push(clip_value)
         self.logger.learning_rate.push(lr)
 
+    # @partial(jax.jit, static_argnums=(8,9))
+    def loss_func(self, params: flax.core.FrozenDict,
+                    apply_fn: Callable,
+                    replay_data, action, 
+                    returns, old_log_prob, 
+                    advantages, clip_value,
+                    value_coef, ent_coef):
+        
+        policy_params, values = self.agent.forward(params, *replay_data)
+        policy_dist = self.agent.dist(policy_params)
+        log_probs = jnp.expand_dims(policy_dist.log_prob(action), axis=-1)
+        entropies = jnp.expand_dims(policy_dist.entropy(), axis=-1)
     
+        value_loss = 0.5 * jnp.square(values - returns).mean()
+        ratio = jnp.exp(log_probs - jax.lax.stop_gradient(old_log_prob))
+
+        surrogate_loss_1 = advantages * ratio
+        surrogate_loss_2 = advantages * \
+                    jax.lax.clamp(1 - clip_value, ratio, 1 + clip_value)
+        
+        policy_loss = - \
+                    jnp.mean(jax.lax.min(surrogate_loss_1, surrogate_loss_2))
+        entropy_loss = jnp.mean(entropies)
+        loss = value_loss * value_coef + \
+                    policy_loss + entropy_loss * ent_coef
+        
+        return loss, (value_loss, policy_loss, entropy_loss, ratio)
 
 
     def rollout_to_jax(self, sample: jnp.ndarray) -> Tuple[jnp.ndarray]:
-        th_obs, th_action, th_next_obs, th_old_log_prob = to_jax([
+        jx_obs, jx_action, jx_next_obs, jx_old_log_prob = to_jax([
             sample["observation"],
             sample["action"],
             sample["next_observation"][:, -1],
             sample["old_log_prob"]])
-        return th_obs, th_action, th_next_obs, th_old_log_prob
+        return jx_obs, jx_action, jx_next_obs, jx_old_log_prob
 
     def prepare_rollout(self, sample: jnp.ndarray) -> List[jnp.ndarray]:
         env_size, rollout_size = sample["observation"].shape[:2]
-        th_obs, th_action, th_next_obs, th_old_log_prob = self.rollout_to_torch(
+        jx_obs, jx_action, jx_next_obs, jx_old_log_prob = self.rollout_to_jax(
             sample)
-
-        _, th_flatten_values = self.agent.network(flatten_time(th_obs))
-        th_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, th_next_value = self.agent.network(th_next_obs)
+        _, jx_flatten_values = self.agent.forward(self.agent.state.params, flatten_time(jx_obs))
+        jx_values = jx_flatten_values.reshape(env_size, rollout_size, 1)
+        _, jx_next_value = self.agent.forward(self.agent.state.params, jx_next_obs)
 
         advantages, returns = to_jax(calculate_gae(
             rewards=sample["reward"],
             terminations=sample["termination"],
-            values=th_values.detach().cpu().numpy(),
-            last_value=th_next_value.detach().cpu().numpy(),
+            values=np.array(jx_values),
+            last_value=np.array(jx_next_value),
             gamma=self.args.gamma,
             gae_lambda=self.args.gae_lambda)
         )
 
-        return (advantages, returns, th_action, th_old_log_prob, th_obs)
+        return (advantages, returns, jx_action, jx_old_log_prob, jx_obs)
 
     def rollout_loader(self, *tensors: Tuple[jnp.ndarray]
                        ) -> Generator[Tuple[jnp.ndarray], None, None]:
@@ -243,11 +246,11 @@ class PPO():
         flatten_tensors = [flatten_time(tensor) for tensor in tensors]
         perm_indices = jax.random.permutation(key = self.rng, x = flatten_tensors[0].shape[0])
 
-        for indices in perm_indices.random.split(self.args.batch_size):
+        for indices in perm_indices.split(self.args.batch_size):
             yield tuple([tensor[indices] for tensor in flatten_tensors])
 
     def replay_rollout(self, obs: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        policy_params, values = self.agent.forward(obs)
+        policy_params, values = self.agent.network.apply_fn(self.agent.state.params, obs)
         return policy_params, values
 
     @staticmethod

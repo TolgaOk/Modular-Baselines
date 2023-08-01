@@ -102,7 +102,7 @@ class Buffer(BaseBuffer):
         sampling_length = min(sampling_length, buffer_size) - rollout_len
         high = self._write_index - rollout_len
         low = high - sampling_length
-        time_indices = self.rng.integer(low=low, high=high + 1, size=batch_size) % buffer_size
+        time_indices = np.random.randint(low=low, high=high + 1, size=batch_size) % buffer_size
 
         time_indices = (time_indices.reshape(-1, 1) +
                         np.arange(rollout_len).reshape(1, -1)) % buffer_size
