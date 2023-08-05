@@ -25,7 +25,7 @@ ex.observers.append(FileStorageObserver("sacred_files"))
 
 @ex.config
 def default_configs():
-    total_timesteps = 50_000
+    total_timesteps = 250_000
     rollout_len = 2048
 
     env_args = dict(
@@ -102,5 +102,5 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
         rng_seed=rng_seed)
     
 
-    train_jit = jax.jit(agent.learn())
+    agent.learn()
     record_log_files(ex, log_dir)
