@@ -10,8 +10,9 @@ import jax.numpy as jnp
 import distrax
 import flax.linen as nn
 
+from typing import Any
 from functools import partial
-from modular_baselines.collectors.collector import RolloutCollector
+from modular_baselines.collectors.collector import RolloutCollectorJax
 from modular_baselines.buffers.buffer import Buffer
 from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.utils.annealings import Coefficient
@@ -71,7 +72,7 @@ class PPO():
 
     def __init__(self,
                  agent: PPOAgent,
-                 collector: RolloutCollector,
+                 collector: RolloutCollectorJax,
                  args: PPOArgs,
                  logger: PPOLogger,
                  rng_seed: int
@@ -113,11 +114,12 @@ class PPO():
         train_start_time = time()
         num_timesteps = 0
         iteration = 0
+        state = self.agent.state
 
         while num_timesteps < self.args.total_timesteps:
             iteration_start_time = time()
-            num_timesteps = self.collector.collect(self.args.rollout_len)
-            self.update()
+            num_timesteps = self.collector.collect(self.args.rollout_len, state)
+            state = self.update(state)
             iteration += 1
 
             self.logger.iteration.push(iteration)
@@ -130,7 +132,7 @@ class PPO():
 
         return None
 
-    def update(self) -> Dict[str, float]:
+    def update(self,state) -> Dict[str, float]:
         """ One step parameter update. This will be called once per rollout.
 
         Returns:
@@ -146,8 +148,8 @@ class PPO():
         # TODO:
         # for param_group in self.optimizer.param_groups:
         #     param_group['lr'] = lr
-        state = self.agent.state
-        rollout_data = self.prepare_rollout(sample)
+        
+        rollout_data = self.prepare_rollout(sample, state)
 
         for epoch in range(self.args.epochs):
             for advantages, returns, action, old_log_prob, *replay_data in self.rollout_loader(*rollout_data):
@@ -173,24 +175,25 @@ class PPO():
 
                 state = state.apply_gradients(grads=grads)
 
-                self.logger.value_loss.push(value_loss)
-                self.logger.policy_loss.push(policy_loss)
-                self.logger.entropy_loss.push(entropy_loss)
+                self.logger.value_loss.push(np.array(value_loss, dtype="float64"))
+                self.logger.policy_loss.push(np.array(policy_loss, dtype="float64"))
+                self.logger.entropy_loss.push(np.array(entropy_loss, dtype="float64"))
                 self.logger.approxkl.push(
-                    ((ratio - 1) - jnp.log(ratio)).mean().item())
-
+                    (np.array((ratio - 1) - jnp.log(ratio), dtype="float64").mean().item()))
         self.logger.clip_range.push(clip_value)
         self.logger.learning_rate.push(lr)
 
+        return state
+
     # @partial(jax.jit, static_argnums=(8,9))
     def loss_func(self, params: flax.core.FrozenDict,
-                    apply_fn: Callable,
+                    apply_fn: Callable[..., Any],
                     replay_data, action, 
                     returns, old_log_prob, 
                     advantages, clip_value,
                     value_coef, ent_coef):
         
-        policy_params, values = self.agent.forward(params, *replay_data)
+        policy_params, values = self.agent.forward(apply_fn, params, *replay_data)
         policy_dist = self.agent.dist(policy_params)
         log_probs = jnp.expand_dims(policy_dist.log_prob(action), axis=-1)
         entropies = jnp.expand_dims(policy_dist.entropy(), axis=-1)
@@ -219,13 +222,13 @@ class PPO():
             sample["old_log_prob"]])
         return jx_obs, jx_action, jx_next_obs, jx_old_log_prob
 
-    def prepare_rollout(self, sample: jnp.ndarray) -> List[jnp.ndarray]:
+    def prepare_rollout(self, sample: jnp.ndarray, state: TrainState) -> List[jnp.ndarray]:
         env_size, rollout_size = sample["observation"].shape[:2]
         jx_obs, jx_action, jx_next_obs, jx_old_log_prob = self.rollout_to_jax(
             sample)
-        _, jx_flatten_values = self.agent.forward(self.agent.state.params, flatten_time(jx_obs))
+        _, jx_flatten_values = self.agent.forward(state.apply_fn, state.params, flatten_time(jx_obs))
         jx_values = jx_flatten_values.reshape(env_size, rollout_size, 1)
-        _, jx_next_value = self.agent.forward(self.agent.state.params, jx_next_obs)
+        _, jx_next_value = self.agent.forward(state.apply_fn, state.params, jx_next_obs)
 
         advantages, returns = to_jax(calculate_gae(
             rewards=sample["reward"],
@@ -249,8 +252,8 @@ class PPO():
         for indices in perm_indices.split(self.args.batch_size):
             yield tuple([tensor[indices] for tensor in flatten_tensors])
 
-    def replay_rollout(self, obs: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        policy_params, values = self.agent.network.apply_fn(self.agent.state.params, obs)
+    def replay_rollout(self, apply_fn, params, obs: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        policy_params, values = apply_fn(params, obs)
         return policy_params, values
 
     @staticmethod
@@ -326,7 +329,7 @@ class PPO():
             ("old_log_prob", np.float32, (1,)),
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, mb_logger)
-        collector = RolloutCollector(
+        collector = RolloutCollectorJax(
             env=env,
             buffer=buffer,
             agent=agent,

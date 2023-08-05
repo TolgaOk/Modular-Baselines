@@ -2,6 +2,7 @@ from typing import Optional, Any, Dict, Tuple, Union, List, Callable
 from abc import ABC, abstractmethod
 import flax.linen as nn
 import jax
+import flax
 import distrax
 import jax.numpy as jnp
 import numpy as np
@@ -47,10 +48,11 @@ class JaxAgent(BaseAgent):
         super().__init__(observation_space, action_space, logger)
 
     def forward(self,
+                apply_fn,
                 params,
                 observation: jnp.ndarray,
                 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        policy_params, value = self.state.apply_fn({'params': params}, observation)
+        policy_params, value = apply_fn({'params': params}, observation)
         return policy_params, value
 
     def dist(self,
@@ -71,13 +73,15 @@ class JaxAgent(BaseAgent):
 
     def sample_action(self,
                       observation: np.ndarray,
+                      apply_fn: Callable[..., Any],
+                      params: flax.core.frozen_dict.FrozenDict,
                       ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         
         self.rng, _rng = jax.random.split(self.rng)
 
         jx_observation = to_jax(observation)
 
-        policy_params, _ = self.forward(self.state.params, jx_observation)
+        policy_params, _ = self.forward(apply_fn, params, jx_observation)
         policy_dist = self.dist(policy_params)
         jx_action = policy_dist.sample(seed=_rng)
         log_prob = jnp.expand_dims(policy_dist.log_prob(jx_action), axis=-1)
