@@ -1,19 +1,27 @@
-from typing import Tuple, Union, Dict, Generator, List, Protocol
+from typing import Tuple, Union, Dict, Generator, List, Protocol, Callable
 from time import time
 from dataclasses import dataclass
-import numpy as np
 from gymnasium.vector import VectorEnv
-import torch
+import jax
+import flax
+import optax
+import numpy as np
+import jax.numpy as jnp
+import distrax
+import flax.linen as nn
 
-from modular_baselines.collectors.collector import RolloutCollector
+from typing import Any
+from functools import partial
+from modular_baselines.collectors.collector import RolloutCollectorJax
 from modular_baselines.buffers.buffer import Buffer
 from modular_baselines.algorithms.agent import BaseAgent
 from modular_baselines.utils.annealings import Coefficient
-from modular_baselines.algorithms.advantages import calculate_gae
+from modular_baselines.algorithms.advantages import calculate_gae_jax as calculate_gae
 from modular_baselines.loggers.logger import MBLogger, LogGroup
 from modular_baselines.loggers.writers import StdWriter, JsonWriter
 from modular_baselines.loggers.datalog import ListDataLog, SingularDataLog, HistogramDataLog
-from modular_baselines.utils.utils import to_torch, flatten_time, get_spaces
+from modular_baselines.utils.utils import to_jax, flatten_time, get_spaces
+from modular_baselines.networks.network_jax import TrainState
 
 
 @dataclass(frozen=True)
@@ -35,14 +43,13 @@ class PPOArgs():
 
 
 class PPOAgent(Protocol):
-    network: torch.nn.Module
+    network: nn.Module
 
     def device(self) -> str: ...
-    def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]: ...
 
-    def dist(self, obs: torch.Tensor) -> Union[
-        torch.distributions.Normal,
-        torch.distributions.Categorical]: ...
+    def dist(self, obs: jnp.ndarray) -> Union[
+        distrax.Normal,
+        distrax.Categorical]: ...
 
 
 class PPOLogger(Protocol):
@@ -65,33 +72,36 @@ class PPO():
 
     def __init__(self,
                  agent: PPOAgent,
-                 collector: RolloutCollector,
+                 collector: RolloutCollectorJax,
                  args: PPOArgs,
                  logger: PPOLogger,
+                 rng_seed: int
                  ):
 
         self.agent = agent
         self.collector = collector
         self.logger = logger
-
-        self.optimizer = torch.optim.Adam(self.agent.network.parameters(), lr=1e-4)
+        self.rng = jax.random.PRNGKey(rng_seed)
+        
         self.buffer = self.collector.buffer
         self.num_envs = self.collector.env.num_envs
 
         self.args = args
+        
 
     def learn(self) -> None:
         """ Main loop for running the on-policy algorithm
         """
-
+        
         train_start_time = time()
         num_timesteps = 0
         iteration = 0
+        state = self.agent.state
 
         while num_timesteps < self.args.total_timesteps:
             iteration_start_time = time()
-            num_timesteps = self.collector.collect(self.args.rollout_len)
-            self.update()
+            num_timesteps = self.collector.collect(self.args.rollout_len, state)
+            state = self.update(state)
             iteration += 1
 
             self.logger.iteration.push(iteration)
@@ -104,13 +114,12 @@ class PPO():
 
         return None
 
-    def update(self) -> Dict[str, float]:
+    def update(self,state) -> Dict[str, float]:
         """ One step parameter update. This will be called once per rollout.
 
         Returns:
             Dict[str, float]: Dictionary of losses to log
         """
-        self.agent.network.train(True)
         sample = self.buffer.sample(batch_size=self.num_envs,
                                     rollout_len=self.args.rollout_len,
                                     sampling_length=self.args.rollout_len)
@@ -118,10 +127,11 @@ class PPO():
         clip_value = next(self.args.clip_value)
         lr = next(self.args.lr)
 
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = lr
-
-        rollout_data = self.prepare_rollout(sample)
+        # TODO:
+        # for param_group in self.optimizer.param_groups:
+        #     param_group['lr'] = lr
+        
+        rollout_data = self.prepare_rollout(sample, state)
 
         for epoch in range(self.args.epochs):
             for advantages, returns, action, old_log_prob, *replay_data in self.rollout_loader(*rollout_data):
@@ -130,79 +140,112 @@ class PPO():
                     advantages = (advantages - advantages.mean()
                                   ) / (advantages.std() + 1e-8)
 
-                policy_params, values = self.replay_rollout(*replay_data)
-                policy_dist = self.agent.dist(policy_params)
-                log_probs = policy_dist.log_prob(action).unsqueeze(-1)
-                entropies = policy_dist.entropy().unsqueeze(-1)
-
-                value_loss = torch.nn.functional.mse_loss(values, returns)
-
-                ratio = torch.exp(log_probs - old_log_prob.detach())
-                surrogate_loss_1 = advantages * ratio
-                surrogate_loss_2 = advantages * \
-                    torch.clamp(ratio, 1 - clip_value, 1 + clip_value)
-                policy_loss = - \
-                    torch.minimum(surrogate_loss_1, surrogate_loss_2).mean()
-                entropy_loss = -entropies.mean()
-                loss = value_loss * self.args.value_coef + \
-                    policy_loss + entropy_loss * self.args.ent_coef
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.agent.network.parameters(),
-                    self.args.max_grad_norm)
-                self.optimizer.step()
-
-                self.logger.value_loss.push(value_loss.item())
-                self.logger.policy_loss.push(policy_loss.item())
-                self.logger.entropy_loss.push(entropy_loss.item())
+                state, data = self.update_jit(state, action, replay_data,
+                            returns, old_log_prob, advantages, clip_value,
+                                self.args.value_coef, self.args.ent_coef)
+                
+                loss, (value_loss, policy_loss, entropy_loss, ratio) = data
+                
+                self.logger.value_loss.push(np.array(value_loss, dtype="float64"))
+                self.logger.policy_loss.push(np.array(policy_loss, dtype="float64"))
+                self.logger.entropy_loss.push(np.array(entropy_loss, dtype="float64"))
                 self.logger.approxkl.push(
-                    ((ratio - 1) - ratio.log()).mean().item())
-
+                    (np.array((ratio - 1) - jnp.log(ratio), dtype="float64").mean().item()))
         self.logger.clip_range.push(clip_value)
         self.logger.learning_rate.push(lr)
 
-    def rollout_to_torch(self, sample: np.ndarray) -> Tuple[torch.Tensor]:
-        th_obs, th_action, th_next_obs, th_old_log_prob = to_torch(self.agent.device, [
+        return state
+
+    @partial(jax.jit, static_argnums=(0,8,9))
+    def update_jit(self, state, action, replay_data, returns, old_log_prob, advantages, clip_value,
+                                value_coef, ent_coef):
+
+        def loss_func(params: flax.core.FrozenDict,
+                    apply_fn: Callable[..., Any],
+                    returns,
+                    old_log_prob, 
+                    advantages, 
+                    clip_value,
+                    value_coef, 
+                    ent_coef):
+            
+            policy_params, values = self.agent.forward(apply_fn, params, *replay_data)
+            policy_dist = self.agent.dist(policy_params)
+            log_probs = jnp.expand_dims(policy_dist.log_prob(action), axis=-1)
+            entropies = jnp.expand_dims(policy_dist.entropy(), axis=-1)
+        
+            value_loss = 0.5 * jnp.square(values - returns).mean()
+            ratio = jnp.exp(log_probs - jax.lax.stop_gradient(old_log_prob))
+
+            surrogate_loss_1 = advantages * ratio
+            surrogate_loss_2 = advantages * \
+                        jax.lax.clamp(1 - clip_value, ratio, 1 + clip_value)
+            
+            policy_loss = - \
+                        jnp.mean(jax.lax.min(surrogate_loss_1, surrogate_loss_2))
+            entropy_loss = jnp.mean(entropies)
+            loss = value_loss * value_coef + \
+                        policy_loss + entropy_loss * ent_coef
+            
+            return loss, (value_loss, policy_loss, entropy_loss, ratio)
+
+        grad_fn = jax.value_and_grad(loss_func, has_aux=True)
+                
+        data, grads = grad_fn(state.params,
+                            state.apply_fn,
+                            returns,
+                            old_log_prob, 
+                            advantages, 
+                            clip_value,
+                            value_coef, 
+                            ent_coef)
+
+        state = state.apply_gradients(grads=grads)
+
+        return state, data
+
+
+    def rollout_to_jax(self, sample: jnp.ndarray) -> Tuple[jnp.ndarray]:
+        jx_obs, jx_action, jx_reward, jx_next_obs, jx_old_log_prob, jx_termination = to_jax([
             sample["observation"],
             sample["action"],
+            sample["reward"],
             sample["next_observation"][:, -1],
-            sample["old_log_prob"]])
-        return th_obs, th_action, th_next_obs, th_old_log_prob
+            sample["old_log_prob"],
+            sample["termination"]])
+        return jx_obs, jx_action, jx_reward, jx_next_obs, jx_old_log_prob, jx_termination
 
-    def prepare_rollout(self, sample: np.ndarray) -> List[torch.Tensor]:
+    def prepare_rollout(self, sample: jnp.ndarray, state: TrainState) -> List[jnp.ndarray]:
         env_size, rollout_size = sample["observation"].shape[:2]
-        th_obs, th_action, th_next_obs, th_old_log_prob = self.rollout_to_torch(
+        jx_obs, jx_action, jx_reward, jx_next_obs, jx_old_log_prob, jx_termination = self.rollout_to_jax(
             sample)
+        _, jx_flatten_values = self.agent.forward(state.apply_fn, state.params, flatten_time(jx_obs))
+        jx_values = jx_flatten_values.reshape(env_size, rollout_size, 1)
+        _, jx_next_value = self.agent.forward(state.apply_fn, state.params, jx_next_obs)
 
-        _, th_flatten_values = self.agent.network(flatten_time(th_obs))
-        th_values = th_flatten_values.reshape(env_size, rollout_size, 1)
-        _, th_next_value = self.agent.network(th_next_obs)
-
-        advantages, returns = to_torch(self.agent.device, calculate_gae(
-            rewards=sample["reward"],
-            terminations=sample["termination"],
-            values=th_values.detach().cpu().numpy(),
-            last_value=th_next_value.detach().cpu().numpy(),
+        advantages, returns = calculate_gae(
+            rewards=jx_reward,
+            terminations=jx_termination,
+            values=jx_values,
+            last_value=jx_next_value,
             gamma=self.args.gamma,
             gae_lambda=self.args.gae_lambda)
-        )
 
-        return (advantages, returns, th_action, th_old_log_prob, th_obs)
+        return (advantages, returns, jx_action, jx_old_log_prob, jx_obs)
 
-    def rollout_loader(self, *tensors: Tuple[torch.Tensor]
-                       ) -> Generator[Tuple[torch.Tensor], None, None]:
+    def rollout_loader(self, *tensors: Tuple[jnp.ndarray]
+                       ) -> Generator[Tuple[jnp.ndarray], None, None]:
         if len(tensors) == 0:
             raise ValueError("Empty tensors")
+
         flatten_tensors = [flatten_time(tensor) for tensor in tensors]
-        perm_indices = torch.randperm(flatten_tensors[0].shape[0])
+        perm_indices = jax.random.permutation(key = self.rng, x = flatten_tensors[0].shape[0])
 
         for indices in perm_indices.split(self.args.batch_size):
             yield tuple([tensor[indices] for tensor in flatten_tensors])
 
-    def replay_rollout(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        policy_params, values = self.agent.forward(obs)
+    def replay_rollout(self, apply_fn, params, obs: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        policy_params, values = apply_fn(params, obs)
         return policy_params, values
 
     @staticmethod
@@ -264,6 +307,7 @@ class PPO():
               agent: BaseAgent,
               mb_logger: MBLogger,
               args: PPOArgs,
+              rng_seed: int,
               ) -> "PPO":
         observation_space, action_space, action_dim = get_spaces(env)
 
@@ -277,16 +321,18 @@ class PPO():
             ("old_log_prob", np.float32, (1,)),
         ])
         buffer = Buffer(struct, args.rollout_len, env.num_envs, mb_logger)
-        collector = RolloutCollector(
+        collector = RolloutCollectorJax(
             env=env,
             buffer=buffer,
             agent=agent,
             logger=mb_logger,
-            store_normalizer_stats=False,
+            rng_seed=rng_seed,
+            store_normalizer_stats=False
         )
         return PPO(
             agent=agent,
             collector=collector,
             args=args,
             logger=mb_logger,
+            rng_seed=rng_seed,
         )

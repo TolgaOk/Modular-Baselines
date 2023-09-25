@@ -36,11 +36,13 @@ class Buffer(BaseBuffer):
                  capacity: int,
                  num_envs: int,
                  logger: MBLogger,
+                 rng_seed: Optional[int] = None,
                  ) -> None:
         self.struct = struct
         self.capacity = capacity
         self.num_envs = num_envs
         self.logger = logger
+        self.rng_seed = np.random.default_rng(rng_seed)
 
         available_memory = psutil.virtual_memory().available
         required_memory = struct.itemsize * capacity * num_envs
