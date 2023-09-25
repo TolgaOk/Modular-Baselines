@@ -11,7 +11,7 @@ To keep the codebase easy to read and maintain, we've implemented each algorithm
 | Algorithm |  <img src="https://raw.githubusercontent.com/google/jax/main/images/jax_logo_250px.png" width = 64px alt="logo"></img> | <img src="https://pytorch.org/assets/images/pytorch-logo.png" width = 50px  height = 50px alt="logo"></img> |
 |:-----:|:---------:|:---------:|
 |  A2C  |:x:|:heavy_check_mark:|
-|  PPO  |:x:|:heavy_check_mark:|
+|  PPO  |:heavy_check_mark:|:heavy_check_mark:|
 |  Recurrent PPO  |:x:|:heavy_check_mark:|
 |  SAC  |:x:|:x:|
 |  TD3  |:x:|:x:|
