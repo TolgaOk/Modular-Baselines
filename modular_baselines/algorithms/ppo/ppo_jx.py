@@ -88,24 +88,6 @@ class PPO():
 
         self.args = args
         
-        # self.create_network()
-        
-
-    # def create_network(self):
-    #     rng, _rng = jax.random.split(self.rng)
-
-    #     inputs = [_rng, self.collector._last_obs]
-    #     network_params = self.agent.network.init(*inputs)
-
-    #     tx = optax.chain(optax.clip_by_global_norm(self.args.max_grad_norm), optax.adam(learning_rate=1e-4))
-
-    #     self.network = TrainState.create(apply_fn=self.agent.network.apply,
-    #                                      params=network_params['params'],
-    #                                      tx=tx,
-    #                                     )
-
-    #     self.rng = rng
-
 
     def learn(self) -> None:
         """ Main loop for running the on-policy algorithm

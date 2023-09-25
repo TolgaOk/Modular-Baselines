@@ -1,10 +1,7 @@
 from typing import Tuple
 
-import jax
 import numpy as np
 import jax.numpy as jnp
-
-from functools import partial
 
 
 def calculate_gae(rewards: np.ndarray,
@@ -46,7 +43,6 @@ def calculate_gae(rewards: np.ndarray,
     returns = advantages + values
     return advantages, returns
 
-# @partial(jax.jit, static_argnums=(4,5))
 def calculate_gae_jax(rewards: jnp.ndarray,
                   terminations: jnp.ndarray,
                   values: jnp.ndarray,

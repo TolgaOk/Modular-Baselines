@@ -18,7 +18,6 @@ class TrainState(flax.struct.PyTreeNode):
   opt_state: optax.OptState
 
   def apply_gradients(self, *, grads, **kwargs):
-    # print(type(grads), type(self.opt_state), type(self.params))
     updates, new_opt_state = self.tx.update(
         grads, self.opt_state, self.params)
     new_params = optax.apply_updates(self.params, updates)

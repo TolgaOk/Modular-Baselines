@@ -100,7 +100,6 @@ def run(ppo_args: PPOArgs, env_args: Dict[str, Any], log_dir: str):
         mb_logger=logger,
         args=ppo_args,
         rng_seed=rng_seed)
-    
 
     agent.learn()
     record_log_files(ex, log_dir)

@@ -88,7 +88,6 @@ class JaxAgent(BaseAgent):
         jx_action = policy_dist.sample(seed=_rng)
         log_prob = jnp.expand_dims(policy_dist.log_prob(jx_action), axis=-1)
         if isinstance(self.action_space, Discrete):
-            # th_action = th_action.unsqueeze(-1)
             raise NotImplementedError(
                 f"Unsupported action space distribution {self.action_space.__class__.__name__}!")
         return jx_action, {"old_log_prob": log_prob}

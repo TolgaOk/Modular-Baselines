@@ -1,6 +1,6 @@
 # Modular-Baselines
 
-> :warning: Under Development (In the current version there is no JAX algorithms and network)
+> :warning: Under Development
 
 Modular-Baselines is a library designed for Reinforcement Learning (RL) research. Our goal is to provide a flexible, easy-to-use set of components that can be combined in various ways to enable experimentation with different RL algorithms. Our components are designed to be framework-agnostic, meaning they don't rely on a specific framework like PyTorch, TensorFlow, or Jax. However, we do include both PyTorch and Jax implementations of some of the algorithms.
 
