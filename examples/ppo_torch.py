@@ -20,7 +20,7 @@ ex.observers.append(FileStorageObserver("sacred_files"))
 
 @ex.config
 def default_configs():
-    total_timesteps = 50_000
+    total_timesteps = 250_000
     rollout_len = 2048
 
     env_args = dict(

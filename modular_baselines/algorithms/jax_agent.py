@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from gymnasium.spaces import Space, Discrete, Box
 from flax.training.train_state import TrainState
+from functools import partial
 
 from modular_baselines.loggers.logger import MBLogger
 from modular_baselines.utils.utils import to_jax
@@ -47,6 +48,7 @@ class JaxAgent(BaseAgent):
         self.rng = jax.random.PRNGKey(rng_seed)
         super().__init__(observation_space, action_space, logger)
 
+    @partial(jax.jit, static_argnums=(0,1))
     def forward(self,
                 apply_fn,
                 params,
